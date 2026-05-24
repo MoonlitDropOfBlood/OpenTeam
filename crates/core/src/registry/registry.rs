@@ -1,0 +1,69 @@
+use std::collections::HashMap;
+use crate::config::agent::AgentConfig;
+use uuid::Uuid;
+
+pub type AgentId = Uuid;
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum AgentStatus {
+    Idle,
+    Busy,
+    Paused,
+    Offline,
+}
+
+#[derive(Debug, Clone)]
+pub struct AgentRecord {
+    pub id: AgentId,
+    pub config: AgentConfig,
+    pub status: AgentStatus,
+    pub current_task: Option<String>,
+}
+
+pub struct AgentRegistry {
+    agents: HashMap<AgentId, AgentRecord>,
+}
+
+impl AgentRegistry {
+    pub fn new() -> Self {
+        Self { agents: HashMap::new() }
+    }
+
+    pub fn register(&mut self, config: AgentConfig) -> AgentId {
+        let id = Uuid::now_v7();
+        let record = AgentRecord {
+            id,
+            config,
+            status: AgentStatus::Idle,
+            current_task: None,
+        };
+        self.agents.insert(id, record);
+        id
+    }
+
+    pub fn get(&self, id: &AgentId) -> Option<&AgentRecord> {
+        self.agents.get(id)
+    }
+
+    pub fn find_by_role(&self, role_keyword: &str) -> Vec<&AgentRecord> {
+        self.agents.values()
+            .filter(|a| a.config.role.contains(role_keyword))
+            .collect()
+    }
+
+    pub fn find_idle(&self) -> Vec<&AgentRecord> {
+        self.agents.values()
+            .filter(|a| a.status == AgentStatus::Idle)
+            .collect()
+    }
+
+    pub fn update_status(&mut self, id: &AgentId, status: AgentStatus) {
+        if let Some(record) = self.agents.get_mut(id) {
+            record.status = status;
+        }
+    }
+
+    pub fn all(&self) -> Vec<&AgentRecord> {
+        self.agents.values().collect()
+    }
+}
