@@ -25,4 +25,7 @@ pub enum CoreError {
 
     #[error("Memory error: {0}")]
     Memory(String),
+
+    #[error("Plugin error: {0}")]
+    Plugin(String),
 }
