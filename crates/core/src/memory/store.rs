@@ -234,6 +234,67 @@ impl MemoryStore {
         Ok(())
     }
 
+    /// Get all memory entries across all agents
+    pub async fn list_all(&self) -> Result<Vec<MemoryEntry>, CoreError> {
+        #[derive(sqlx::FromRow)]
+        struct MemoryRow {
+            id: String,
+            agent_id: String,
+            memory_type: String,
+            title: String,
+            summary: String,
+            decisions: String,
+            artifacts: String,
+            pending_todos: String,
+            importance: i32,
+            embedding: Option<Vec<u8>>,
+            turn_indices: String,
+            created_at: String,
+            last_accessed: String,
+            access_count: i32,
+        }
+
+        let rows = sqlx::query_as::<_, MemoryRow>(
+            "SELECT * FROM memory_entries ORDER BY created_at DESC"
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| CoreError::Memory(format!("List all: {e}")))?;
+
+        rows.into_iter().map(|r| {
+            let memory_type = match r.memory_type.as_str() {
+                "ShortTerm" => MemoryType::ShortTerm,
+                "LongTerm" => MemoryType::LongTerm,
+                other => return Err(CoreError::Memory(format!("Unknown memory_type: {other}"))),
+            };
+            Ok(MemoryEntry {
+                id: uuid::Uuid::parse_str(&r.id)
+                    .map_err(|e| CoreError::Memory(format!("Parse UUID: {e}")))?,
+                agent_id: r.agent_id,
+                memory_type,
+                title: r.title,
+                summary: r.summary,
+                decisions: serde_json::from_str(&r.decisions)
+                    .map_err(|e| CoreError::Memory(format!("Parse decisions: {e}")))?,
+                artifacts: serde_json::from_str(&r.artifacts)
+                    .map_err(|e| CoreError::Memory(format!("Parse artifacts: {e}")))?,
+                pending_todos: serde_json::from_str(&r.pending_todos)
+                    .map_err(|e| CoreError::Memory(format!("Parse todos: {e}")))?,
+                importance: r.importance as u8,
+                embedding: r.embedding.map(|b| blob_to_embedding(&b)),
+                turn_indices: serde_json::from_str(&r.turn_indices)
+                    .map_err(|e| CoreError::Memory(format!("Parse indices: {e}")))?,
+                created_at: chrono::DateTime::parse_from_rfc3339(&r.created_at)
+                    .map_err(|e| CoreError::Memory(format!("Parse created_at: {e}")))?
+                    .with_timezone(&chrono::Utc),
+                last_accessed: chrono::DateTime::parse_from_rfc3339(&r.last_accessed)
+                    .map_err(|e| CoreError::Memory(format!("Parse last_accessed: {e}")))?
+                    .with_timezone(&chrono::Utc),
+                access_count: r.access_count as u32,
+            })
+        }).collect()
+    }
+
     pub fn config(&self) -> &MemoryConfig {
         &self.config
     }
@@ -242,8 +303,8 @@ impl MemoryStore {
     pub async fn apply_eviction(&self) -> Result<Vec<Uuid>, CoreError> {
         let mut removed = Vec::new();
 
-        // Short-term eviction: age > max_age_days
-        let all = self.list_by_agent("").await?;  // get all entries
+        // Get all entries
+        let all = self.list_all().await?;
         // Separate by type
         let short_term: Vec<&MemoryEntry> = all.iter().filter(|e| e.memory_type == MemoryType::ShortTerm).collect();
         let long_term: Vec<&MemoryEntry> = all.iter().filter(|e| e.memory_type == MemoryType::LongTerm).collect();
@@ -258,7 +319,7 @@ impl MemoryStore {
         }
 
         // Short-term: if still over max_count, evict lowest value
-        let remaining_short = self.list_by_agent("").await?.into_iter()
+        let remaining_short = self.list_all().await?.into_iter()
             .filter(|e| e.memory_type == MemoryType::ShortTerm)
             .collect::<Vec<_>>();
         if remaining_short.len() > self.config.short_term_max_count as usize {
