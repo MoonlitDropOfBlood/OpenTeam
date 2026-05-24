@@ -26,7 +26,7 @@ pub fn draw(f: &mut Frame, app: &App) {
     // Main content
     match app.current_page {
         Page::Home => crate::pages::home::draw(f, chunks[1], app),
-        Page::Agents => draw_placeholder(f, chunks[1], "Agent Management (F2)"),
+        Page::Agents => crate::pages::agents::draw(f, chunks[1], app),
         Page::Tasks => draw_placeholder(f, chunks[1], "Task Board (F3)"),
         Page::Logs => draw_placeholder(f, chunks[1], "Log Viewer (F4)"),
         Page::Feishu => draw_placeholder(f, chunks[1], "Feishu Status (F5)"),

@@ -16,7 +16,6 @@ fn main() -> anyhow::Result<()> {
     let mut app = App::new();
 
     // Seed demo data
-    app.agent_count = 3;
     app.push_message("System: Core initialized".into());
     app.push_message("System: 3 agents loaded".into());
     app.push_message("小红: PRD written, @CodeCat please review".into());
