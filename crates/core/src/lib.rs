@@ -13,12 +13,14 @@ pub struct Core {
     pub registry: registry::AgentRegistry,
     pub llm_gateway: llm::gateway::LlmGateway,
     pub feishu_bridge: feishu::bridge::FeishuBridge,
+    pub memory_store: memory::store::MemoryStore,
 }
 
 impl Core {
     pub async fn new(
         agents_dir: &Path,
         llm_config_path: &Path,
+        memory_db_path: &str,
     ) -> Result<Self, CoreError> {
         let llm_config = config::load_llm_config(llm_config_path)?;
         let mut registry = registry::AgentRegistry::new();
@@ -27,10 +29,14 @@ impl Core {
             registry.register(cfg);
         }
 
+        let memory_config = memory::types::MemoryConfig::default();
+        let memory_store = memory::store::MemoryStore::new(memory_db_path, memory_config).await?;
+
         Ok(Self {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
             feishu_bridge: feishu::bridge::FeishuBridge::new(),
+            memory_store,
         })
     }
 

@@ -12,7 +12,7 @@ async fn test_core_initialization() {
         return;
     }
 
-    let core = Core::new(agents_dir, llm_config).await.unwrap();
+    let core = Core::new(agents_dir, llm_config, ":memory:").await.unwrap();
     let agents = core.list_agents();
     assert!(!agents.is_empty(), "Should have loaded at least one agent");
 

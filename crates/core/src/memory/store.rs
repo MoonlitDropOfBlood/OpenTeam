@@ -1,4 +1,5 @@
 use sqlx::SqlitePool;
+use uuid::Uuid;
 use crate::CoreError;
 use super::types::*;
 
@@ -235,6 +236,52 @@ impl MemoryStore {
 
     pub fn config(&self) -> &MemoryConfig {
         &self.config
+    }
+
+    /// Apply eviction: remove lowest-value entries when limits are exceeded
+    pub async fn apply_eviction(&self) -> Result<Vec<Uuid>, CoreError> {
+        let mut removed = Vec::new();
+
+        // Short-term eviction: age > max_age_days
+        let all = self.list_by_agent("").await?;  // get all entries
+        // Separate by type
+        let short_term: Vec<&MemoryEntry> = all.iter().filter(|e| e.memory_type == MemoryType::ShortTerm).collect();
+        let long_term: Vec<&MemoryEntry> = all.iter().filter(|e| e.memory_type == MemoryType::LongTerm).collect();
+
+        // Short-term: evict expired entries
+        for entry in &short_term {
+            let age_days = (now_utc() - entry.created_at).num_hours() as f64 / 24.0;
+            if age_days > self.config.short_term_max_age_days as f64 {
+                self.delete(&entry.id).await?;
+                removed.push(entry.id);
+            }
+        }
+
+        // Short-term: if still over max_count, evict lowest value
+        let remaining_short = self.list_by_agent("").await?.into_iter()
+            .filter(|e| e.memory_type == MemoryType::ShortTerm)
+            .collect::<Vec<_>>();
+        if remaining_short.len() > self.config.short_term_max_count as usize {
+            let excess = remaining_short.len() - self.config.short_term_max_count as usize;
+            let candidates = super::forgetting::select_eviction_candidates(&remaining_short, &self.config, excess);
+            for id in &candidates {
+                self.delete(id).await?;
+                removed.push(*id);
+            }
+        }
+
+        // Long-term: if over max_count, evict lowest value
+        if long_term.len() > self.config.long_term_max_count as usize {
+            let long_entries = all.iter().filter(|e| e.memory_type == MemoryType::LongTerm).cloned().collect::<Vec<_>>();
+            let excess = long_entries.len() - self.config.long_term_max_count as usize;
+            let candidates = super::forgetting::select_eviction_candidates(&long_entries, &self.config, excess);
+            for id in &candidates {
+                self.delete(id).await?;
+                removed.push(*id);
+            }
+        }
+
+        Ok(removed)
     }
 }
 
