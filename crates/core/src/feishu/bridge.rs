@@ -1,6 +1,7 @@
 use std::process::Stdio;
 use std::time::Duration;
-use tokio::process::Command;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, Command};
 use super::message_queue::SendQueue;
 use super::types::*;
 use crate::CoreError;
@@ -113,5 +114,61 @@ impl FeishuBridge {
         .map_err(|e| CoreError::Feishu(format!("Auth check failed: {}", e)))?;
 
         Ok(output.status.success())
+    }
+
+    /// Start consuming events from Feishu WebSocket
+    /// Returns the child process handle (caller must manage lifecycle)
+    pub async fn subscribe_events(
+        &self,
+        event_types: &[&str],
+    ) -> Result<Child, CoreError> {
+        let mut cmd = Command::new("lark-cli");
+        cmd.arg("event")
+            .arg("+subscribe")
+            .arg("--event-types")
+            .arg(event_types.join(","))
+            .arg("--compact")
+            .arg("--quiet")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+
+        let child = cmd.spawn()
+            .map_err(|e| CoreError::Feishu(format!("Failed to subscribe events: {}", e)))?;
+
+        Ok(child)
+    }
+
+    /// Read next NDJSON line from event subscription output
+    pub async fn read_event(
+        reader: &mut BufReader<tokio::process::ChildStdout>,
+    ) -> Option<String> {
+        let mut line = String::new();
+        reader.read_line(&mut line).await.ok()?;
+        if line.trim().is_empty() {
+            None
+        } else {
+            Some(line)
+        }
+    }
+
+    /// Parse event JSON to extract message content
+    pub fn parse_message_event(json: &str) -> Result<FeishuMessage, CoreError> {
+        let value: serde_json::Value = serde_json::from_str(json)
+            .map_err(|e| CoreError::Feishu(format!("Event parse error: {}", e)))?;
+
+        let event = &value["event"];
+        let message = &event["message"];
+
+        Ok(FeishuMessage {
+            message_id: message["message_id"].as_str().unwrap_or("").to_string(),
+            chat_id: message["chat_id"].as_str().unwrap_or("").to_string(),
+            thread_id: message["thread_id"].as_str().map(|s| s.to_string()),
+            sender: SenderInfo {
+                id: event["sender"]["sender_id"]["user_id"].as_str().unwrap_or("").to_string(),
+                name: event["sender"]["sender_id"]["user_id"].as_str().unwrap_or("").to_string(),
+            },
+            content: message["body"]["content"].as_str().unwrap_or("").to_string(),
+            msg_type: message["msg_type"].as_str().unwrap_or("").to_string(),
+        })
     }
 }
