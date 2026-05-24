@@ -6,6 +6,7 @@ pub mod error;
 pub mod memory;
 pub mod agent;
 pub mod router;
+pub mod secretary;
 
 use std::path::Path;
 
@@ -18,6 +19,7 @@ pub struct Core {
     pub memory_store: memory::store::MemoryStore,
     pub agent_manager: agent::manager::AgentManager,
     pub router: router::router::MessageRouter,
+    pub secretary: secretary::secretary::SecretaryAgent,
 }
 
 impl Core {
@@ -38,6 +40,7 @@ impl Core {
 
         let agent_manager = agent::manager::AgentManager::new();
         let router = router::router::MessageRouter::new();
+        let secretary = secretary::secretary::SecretaryAgent::new();
 
         Ok(Self {
             registry,
@@ -46,6 +49,7 @@ impl Core {
             memory_store,
             agent_manager,
             router,
+            secretary,
         })
     }
 
