@@ -1,2 +1,9 @@
 target/
 **/*.rs.bk
+.omo/
+.env
+*.env
+.idea/
+*.swp
+*.swo
+*.pdb

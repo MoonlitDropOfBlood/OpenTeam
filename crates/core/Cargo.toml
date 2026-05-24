@@ -13,4 +13,4 @@ sqlx.workspace = true
 tracing.workspace = true
 thiserror.workspace = true
 uuid.workspace = true
-json_rpc = "0.2"
+json_rpc = "0.2"  # Plugin IPC (Phase 3); crate name uses underscore not hyphen
