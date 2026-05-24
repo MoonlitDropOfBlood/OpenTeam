@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use crate::config::agent::AgentConfig;
+use crate::CoreError;
 use uuid::Uuid;
 
 pub type AgentId = Uuid;
@@ -57,10 +58,10 @@ impl AgentRegistry {
             .collect()
     }
 
-    pub fn update_status(&mut self, id: &AgentId, status: AgentStatus) {
-        if let Some(record) = self.agents.get_mut(id) {
-            record.status = status;
-        }
+    pub fn update_status(&mut self, id: &AgentId, status: AgentStatus) -> Result<(), CoreError> {
+        self.agents.get_mut(id)
+            .map(|record| record.status = status)
+            .ok_or_else(|| CoreError::Registry(format!("Agent {id} not found")))
     }
 
     pub fn all(&self) -> Vec<&AgentRecord> {

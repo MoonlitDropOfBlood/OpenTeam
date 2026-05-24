@@ -21,11 +21,14 @@ pub fn load_llm_config(path: &Path) -> Result<llm::LlmConfig, CoreError> {
     Ok(config)
 }
 
-/// Load all agent configs from a directory
+/// Load all agent configs from a directory (sorted by filename for determinism)
 pub fn load_all_agents(dir: &Path) -> Result<Vec<agent::AgentConfig>, CoreError> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?
+        .collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|e| e.file_name());
+
     let mut configs = Vec::new();
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
+    for entry in entries {
         let path = entry.path();
         if path.extension().map_or(false, |e| e == "yaml") {
             configs.push(load_agent_config(&path)?);
