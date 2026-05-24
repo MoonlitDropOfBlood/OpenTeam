@@ -5,6 +5,7 @@ pub mod feishu;
 pub mod error;
 pub mod memory;
 pub mod agent;
+pub mod router;
 
 use std::path::Path;
 
@@ -16,6 +17,7 @@ pub struct Core {
     pub feishu_bridge: feishu::bridge::FeishuBridge,
     pub memory_store: memory::store::MemoryStore,
     pub agent_manager: agent::manager::AgentManager,
+    pub router: router::router::MessageRouter,
 }
 
 impl Core {
@@ -35,6 +37,7 @@ impl Core {
         let memory_store = memory::store::MemoryStore::new(memory_db_path, memory_config).await?;
 
         let agent_manager = agent::manager::AgentManager::new();
+        let router = router::router::MessageRouter::new();
 
         Ok(Self {
             registry,
@@ -42,6 +45,7 @@ impl Core {
             feishu_bridge: feishu::bridge::FeishuBridge::new(),
             memory_store,
             agent_manager,
+            router,
         })
     }
 
