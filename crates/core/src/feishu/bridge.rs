@@ -165,7 +165,7 @@ impl FeishuBridge {
             thread_id: message["thread_id"].as_str().map(|s| s.to_string()),
             sender: SenderInfo {
                 id: event["sender"]["sender_id"]["user_id"].as_str().unwrap_or("").to_string(),
-                name: event["sender"]["sender_id"]["user_id"].as_str().unwrap_or("").to_string(),
+                name: event["sender"]["name"].as_str().unwrap_or("").to_string(),
             },
             content: message["body"]["content"].as_str().unwrap_or("").to_string(),
             msg_type: message["msg_type"].as_str().unwrap_or("").to_string(),
