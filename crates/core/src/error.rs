@@ -22,4 +22,7 @@ pub enum CoreError {
 
     #[error("Reqwest error: {0}")]
     Reqwest(#[from] reqwest::Error),
+
+    #[error("Memory error: {0}")]
+    Memory(String),
 }
