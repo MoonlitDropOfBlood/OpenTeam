@@ -4,6 +4,7 @@ pub mod llm;
 pub mod feishu;
 pub mod error;
 pub mod memory;
+pub mod agent;
 
 use std::path::Path;
 
@@ -14,6 +15,7 @@ pub struct Core {
     pub llm_gateway: llm::gateway::LlmGateway,
     pub feishu_bridge: feishu::bridge::FeishuBridge,
     pub memory_store: memory::store::MemoryStore,
+    pub agent_manager: agent::manager::AgentManager,
 }
 
 impl Core {
@@ -32,11 +34,14 @@ impl Core {
         let memory_config = memory::types::MemoryConfig::default();
         let memory_store = memory::store::MemoryStore::new(memory_db_path, memory_config).await?;
 
+        let agent_manager = agent::manager::AgentManager::new();
+
         Ok(Self {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
             feishu_bridge: feishu::bridge::FeishuBridge::new(),
             memory_store,
+            agent_manager,
         })
     }
 

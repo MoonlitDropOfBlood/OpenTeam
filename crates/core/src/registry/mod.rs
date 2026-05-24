@@ -1,2 +1,2 @@
 pub mod registry;
-pub use registry::AgentRegistry;
+pub use registry::{AgentRegistry, AgentId, AgentStatus};

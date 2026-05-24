@@ -1,0 +1,128 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
+use tokio::sync::{mpsc, RwLock};
+use tokio_util::sync::CancellationToken;
+use crate::config::agent::AgentConfig;
+use crate::registry::{AgentId, AgentRegistry};
+use super::handle::*;
+use super::inbox::*;
+
+pub struct AgentManager {
+    agents: RwLock<HashMap<AgentId, AgentHandle>>,
+    shutdown_token: CancellationToken,
+}
+
+impl AgentManager {
+    pub fn new() -> Self {
+        Self {
+            agents: RwLock::new(HashMap::new()),
+            shutdown_token: CancellationToken::new(),
+        }
+    }
+
+    pub async fn spawn_agent(
+        &self,
+        config: AgentConfig,
+        _registry: Arc<RwLock<AgentRegistry>>,
+    ) -> AgentId {
+        let id = uuid::Uuid::now_v7();
+        let (control_tx, mut control_rx) = mpsc::channel::<AgentCommand>(64);
+        let cancel_token = self.shutdown_token.child_token();
+        let cancel_clone = cancel_token.clone();
+        let config_clone = config.clone();
+        let id_clone = id;
+
+        let handle = tokio::spawn(async move {
+            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone).await;
+        });
+
+        let agent_handle = AgentHandle {
+            id,
+            config,
+            join_handle: handle,
+            control_tx,
+            cancel_token,
+        };
+
+        self.agents.write().await.insert(id, agent_handle);
+        id
+    }
+
+    pub async fn send_command(&self, id: &AgentId, cmd: AgentCommand) -> Result<(), String> {
+        let agents = self.agents.read().await;
+        if let Some(handle) = agents.get(id) {
+            handle.control_tx.send(cmd).await
+                .map_err(|_| format!("Agent {} channel closed", id))
+        } else {
+            Err(format!("Agent {} not found", id))
+        }
+    }
+
+    pub async fn shutdown_all(&self) {
+        self.shutdown_token.cancel();
+        // Give agents 30s to gracefully stop
+        tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+    }
+
+    pub async fn agent_count(&self) -> usize {
+        self.agents.read().await.len()
+    }
+}
+
+async fn agent_main_loop(
+    config: &AgentConfig,
+    _id: AgentId,
+    control_rx: &mut mpsc::Receiver<AgentCommand>,
+    cancel: CancellationToken,
+) {
+    let mut inbox = PriorityInbox::new();
+    let mut is_paused = false;
+
+    loop {
+        tokio::select! {
+            Some(cmd) = control_rx.recv() => {
+                match cmd {
+                    AgentCommand::Stop => {
+                        tracing::info!("Agent {} stopping", config.name);
+                        break;
+                    }
+                    AgentCommand::Pause => {
+                        is_paused = true;
+                        tracing::info!("Agent {} paused", config.name);
+                    }
+                    AgentCommand::Resume => {
+                        is_paused = false;
+                        tracing::info!("Agent {} resumed", config.name);
+                    }
+                    AgentCommand::InjectMessage(content) => {
+                        inbox.push(InboxMessage {
+                            priority: 3,
+                            content,
+                            received_at: SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_secs() as i64,
+                        });
+                    }
+                    AgentCommand::OverrideContext(ctx) => {
+                        tracing::info!("Context override for {}: {}", config.name, ctx);
+                    }
+                }
+            }
+            _ = cancel.cancelled() => {
+                tracing::info!("Agent {} cancelled, shutting down", config.name);
+                break;
+            }
+        }
+
+        // Process inbox if not paused
+        if !is_paused {
+            while let Some(msg) = inbox.pop() {
+                tracing::info!("Agent {} processing message (pri={}): {:?}",
+                    config.name, msg.priority, &msg.content[..msg.content.len().min(60)]);
+                // Phase 2 V1: just log — actual LLM processing comes later
+            }
+        }
+    }
+}
