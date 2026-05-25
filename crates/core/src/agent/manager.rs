@@ -176,6 +176,7 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                             content: msg.content.clone(),
                         },
                     ],
+                    tools: vec![],
                 };
 
                 match llm_gateway.chat(&config.llm.primary, &request).await {
@@ -219,6 +220,7 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                                         content: msg.content.clone(),
                                     },
                                 ],
+                                tools: vec![],
                             };
                             match llm_gateway.chat(fallback, &fb_request).await {
                                 Ok(resp) => tracing::info!("Agent {} fallback response: {}",

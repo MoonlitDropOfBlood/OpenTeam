@@ -94,6 +94,7 @@ actions 中的每条指令必须包含 type 字段：
             model: model_config.model.clone(),
             system_prompt: self.role.clone(),
             messages,
+            tools: vec![],
         };
 
         // Call LLM
