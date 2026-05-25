@@ -12,7 +12,7 @@ pub mod skill;
 
 use std::path::Path;
 use std::sync::Arc;
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
 pub use error::CoreError;
@@ -26,8 +26,9 @@ pub struct Core {
     pub router: router::router::MessageRouter,
     pub assistant: Arc<Mutex<assistant::assistant::AssistantAgent>>,
     pub plugin_manager: plugin::manager::PluginManager,
-    pub skill_registry: Arc<skill::registry::SkillRegistry>,
+    pub skill_registry: Arc<RwLock<skill::registry::SkillRegistry>>,
     scheduler_handle: Option<JoinHandle<()>>,
+    watcher_handle: Option<JoinHandle<()>>,
 }
 
 impl Core {
@@ -75,7 +76,19 @@ impl Core {
             }
         }
 
-        let skill_registry = Arc::new(skill_registry);
+        let skill_registry = Arc::new(RwLock::new(skill_registry));
+
+        // Collect all skill directories for file watching
+        let mut skill_watch_dirs = vec![global_skills_dir];
+        if asst_skills_dir.exists() {
+            skill_watch_dirs.push(asst_skills_dir);
+        }
+        for record in registry.all() {
+            let agent_skills_dir = agents_dir.join(&record.config.name).join("skills");
+            if agent_skills_dir.exists() {
+                skill_watch_dirs.push(agent_skills_dir);
+            }
+        }
 
         Ok(Self {
             registry,
@@ -88,6 +101,7 @@ impl Core {
             plugin_manager,
             skill_registry,
             scheduler_handle: None,
+            watcher_handle: None,
         })
     }
 
@@ -111,12 +125,29 @@ impl Core {
     }
 
     /// Build the system prompt for an agent by injecting relevant skill instructions
-    pub fn build_agent_prompt(&self, role: &str) -> String {
-        self.skill_registry.build_system_prompt(role)
+    pub async fn build_agent_prompt(&self, role: &str) -> String {
+        self.skill_registry.read().await.build_system_prompt(role)
     }
 
-    /// Start the background scheduler that drives assistant periodic tasks
+    /// Start the background scheduler and skill file watcher
     pub fn start_scheduler(&mut self) {
+        // Start skill file watcher (needs multi-threaded runtime)
+        let skill_registry = self.skill_registry.clone();
+        let global_dir = skill::registry::global_skills_dir();
+        let asst_dir = skill::registry::assistant_skills_dir();
+        let mut watch_dirs = vec![global_dir];
+        if asst_dir.exists() {
+            watch_dirs.push(asst_dir);
+        }
+        if let Ok(watcher) = skill::registry::SkillRegistry::start_watcher(
+            skill_registry,
+            watch_dirs,
+        ) {
+            self.watcher_handle = Some(watcher);
+            tracing::info!("Skill file watcher started");
+        }
+
+        // Start scheduler task
         let assistant = self.assistant.clone();
         let handle = tokio::spawn(async move {
             let mut secs_since_last_summary: u64 = 0;

@@ -17,3 +17,4 @@ uuid.workspace = true
 chrono.workspace = true
 tokio-util.workspace = true
 json_rpc = "0.2"  # Plugin IPC (Phase 3); crate name uses underscore not hyphen
+notify.workspace = true

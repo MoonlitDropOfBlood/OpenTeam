@@ -1,5 +1,7 @@
 use std::collections::HashMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use tokio::sync::RwLock;
 use crate::CoreError;
 
 /// A loaded skill definition
@@ -133,6 +135,67 @@ impl SkillRegistry {
         }
 
         prompt
+    }
+
+    /// Start a file watcher that hot-reloads skills when SKILL.md files change
+    pub fn start_watcher(
+        registry: Arc<RwLock<Self>>,
+        watch_dirs: Vec<PathBuf>,
+    ) -> Result<tokio::task::JoinHandle<()>, CoreError> {
+        use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+        use std::sync::mpsc;
+
+        let (tx, rx) = mpsc::channel::<Result<notify::Event, notify::Error>>();
+        let mut watcher = RecommendedWatcher::new(tx, Config::default())
+            .map_err(|e| CoreError::Skill(format!("Create watcher: {e}")))?;
+
+        for dir in &watch_dirs {
+            if dir.exists() {
+                watcher
+                    .watch(dir, RecursiveMode::Recursive)
+                    .map_err(|e| CoreError::Skill(format!("Watch {:?}: {e}", dir)))?;
+                tracing::info!("[Watcher] Watching skill directory: {:?}", dir);
+            } else {
+                tracing::debug!("[Watcher] Skipping non-existent directory: {:?}", dir);
+            }
+        }
+
+        // Move watcher into the blocking task so it stays alive
+        let handle = tokio::task::spawn_blocking(move || {
+            let _watcher = watcher; // keep alive
+            for res in rx {
+                match res {
+                    Ok(event) => {
+                        let is_skill_change = matches!(
+                            event.kind,
+                            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                        ) && event.paths.iter().any(|p| {
+                            p.file_name().and_then(|n| n.to_str()) == Some("SKILL.md")
+                        });
+
+                        if is_skill_change {
+                            tracing::info!("[Watcher] SKILL.md changed: {:?}, hot-reloading...", event.paths);
+                            let mut reg = registry.blocking_write();
+                            // Clear and re-discover from all watched directories
+                            reg.skills.clear();
+                            for dir in &watch_dirs {
+                                if dir.exists() {
+                                    if let Ok(fresh) = Self::discover(dir) {
+                                        reg.merge(fresh);
+                                    }
+                                }
+                            }
+                            tracing::info!("[Watcher] Hot-reload complete — {} skills loaded", reg.skills.len());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!("[Watcher] Error: {e}");
+                    }
+                }
+            }
+        });
+
+        Ok(handle)
     }
 }
 

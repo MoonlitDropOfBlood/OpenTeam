@@ -30,8 +30,8 @@ impl AgentManager {
         config: AgentConfig,
         _registry: Arc<RwLock<AgentRegistry>>,
         llm_gateway: Arc<LlmGateway>,
-        skill_registry: Arc<SkillRegistry>,
-        memory_store: Arc<MemoryStore>,
+        skill_registry: Arc<RwLock<SkillRegistry>>,
+    memory_store: Arc<MemoryStore>,
     ) -> AgentId {
         let id = uuid::Uuid::now_v7();
         let (control_tx, mut control_rx) = mpsc::channel::<AgentCommand>(64);
@@ -86,14 +86,14 @@ async fn agent_main_loop(
     control_rx: &mut mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
     llm_gateway: Arc<LlmGateway>,
-    skill_registry: Arc<SkillRegistry>,
+skill_registry: Arc<RwLock<SkillRegistry>>,
     memory_store: Arc<MemoryStore>,
 ) {
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
 
     // Build base system prompt: role + skill instructions (constant across messages)
-    let base_prompt = skill_registry.build_system_prompt(&config.role);
+    let base_prompt = skill_registry.read().await.build_system_prompt(&config.role);
 
     loop {
         tokio::select! {
