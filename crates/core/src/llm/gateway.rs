@@ -17,6 +17,7 @@ pub struct ChatRequest {
     pub model: String,
     pub system_prompt: String,
     pub messages: Vec<ChatMessage>,
+    pub tools: Vec<ToolDefinition>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -25,9 +26,24 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolDefinition {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ToolCall {
+    pub id: String,
+    pub name: String,
+    pub arguments: serde_json::Value,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatResponse {
     pub content: String,
+    pub tool_calls: Vec<ToolCall>,
     pub usage: TokenUsage,
 }
 
@@ -124,6 +140,7 @@ impl LlmGateway {
 
         Ok(ChatResponse {
             content,
+            tool_calls: vec![],
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
@@ -165,6 +182,7 @@ impl LlmGateway {
 
         Ok(ChatResponse {
             content,
+            tool_calls: vec![],
             usage: TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
