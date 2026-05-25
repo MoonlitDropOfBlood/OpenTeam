@@ -21,12 +21,12 @@ pub struct Core {
     pub registry: registry::AgentRegistry,
     pub llm_gateway: llm::gateway::LlmGateway,
     pub feishu_bridge: feishu::bridge::FeishuBridge,
-    pub memory_store: memory::store::MemoryStore,
+    pub memory_store: Arc<memory::store::MemoryStore>,
     pub agent_manager: agent::manager::AgentManager,
     pub router: router::router::MessageRouter,
     pub assistant: Arc<Mutex<assistant::assistant::AssistantAgent>>,
     pub plugin_manager: plugin::manager::PluginManager,
-    pub skill_registry: skill::registry::SkillRegistry,
+    pub skill_registry: Arc<skill::registry::SkillRegistry>,
     scheduler_handle: Option<JoinHandle<()>>,
 }
 
@@ -44,7 +44,7 @@ impl Core {
         }
 
         let memory_config = memory::types::MemoryConfig::default();
-        let memory_store = memory::store::MemoryStore::new(memory_db_path, memory_config).await?;
+        let memory_store = Arc::new(memory::store::MemoryStore::new(memory_db_path, memory_config).await?);
 
         let agent_manager = agent::manager::AgentManager::new();
         let router = router::router::MessageRouter::new();
@@ -53,7 +53,7 @@ impl Core {
 
         // Discover skills
         let skills_dir = Path::new("skills");
-        let skill_registry = skill::registry::SkillRegistry::discover(skills_dir)?;
+        let skill_registry = Arc::new(skill::registry::SkillRegistry::discover(skills_dir)?);
 
         Ok(Self {
             registry,

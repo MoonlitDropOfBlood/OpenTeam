@@ -6,6 +6,9 @@ use tokio_util::sync::CancellationToken;
 use crate::config::agent::AgentConfig;
 use crate::llm::gateway::{LlmGateway, ChatRequest, ChatMessage};
 use crate::registry::{AgentId, AgentRegistry};
+use crate::skill::registry::SkillRegistry;
+use crate::memory::store::MemoryStore;
+use crate::memory::types::{MemoryEntry, MemoryType};
 use super::handle::*;
 use super::inbox::*;
 
@@ -27,6 +30,8 @@ impl AgentManager {
         config: AgentConfig,
         _registry: Arc<RwLock<AgentRegistry>>,
         llm_gateway: Arc<LlmGateway>,
+        skill_registry: Arc<SkillRegistry>,
+        memory_store: Arc<MemoryStore>,
     ) -> AgentId {
         let id = uuid::Uuid::now_v7();
         let (control_tx, mut control_rx) = mpsc::channel::<AgentCommand>(64);
@@ -35,9 +40,11 @@ impl AgentManager {
         let config_clone = config.clone();
         let id_clone = id;
         let llm_gateway_clone = llm_gateway;
+        let skills_clone = skill_registry;
+        let memory_clone = memory_store;
 
         let handle = tokio::spawn(async move {
-            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone, llm_gateway_clone).await;
+            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone, llm_gateway_clone, skills_clone, memory_clone).await;
         });
 
         let agent_handle = AgentHandle {
@@ -79,9 +86,14 @@ async fn agent_main_loop(
     control_rx: &mut mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
     llm_gateway: Arc<LlmGateway>,
+    skill_registry: Arc<SkillRegistry>,
+    memory_store: Arc<MemoryStore>,
 ) {
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
+
+    // Build base system prompt: role + skill instructions (constant across messages)
+    let base_prompt = skill_registry.build_system_prompt(&config.role, &config.skills);
 
     loop {
         tokio::select! {
@@ -125,10 +137,39 @@ async fn agent_main_loop(
             while let Some(msg) = inbox.pop() {
                 tracing::info!("Agent {} processing message (pri={})", config.name, msg.priority);
 
-                // Build LLM request from agent config
+                // Build full system prompt with memory context for this message
+                let full_prompt = {
+                    // Search for relevant memories from this agent (Phase 3 V3: real embedding)
+                    let zero_vec = vec![0.0f32; 768];
+                    let memories = memory_store.search_semantic(
+                        &config.name,
+                        &zero_vec,
+                        3,
+                    ).await.unwrap_or_default();
+
+                    if memories.is_empty() {
+                        base_prompt.clone()
+                    } else {
+                        let mut prompt = base_prompt.clone();
+                        prompt.push_str("\n\n## 相关记忆\n");
+                        for (i, mem) in memories.iter().enumerate() {
+                            prompt.push_str(&format!(
+                                "{}. {} (重要性: {}, 相似度: {:.2})\n   {}\n",
+                                i + 1,
+                                mem.entry.title,
+                                mem.entry.importance,
+                                mem.semantic_score,
+                                mem.entry.summary,
+                            ));
+                        }
+                        prompt
+                    }
+                };
+
+                // Build LLM request with enhanced prompt
                 let request = ChatRequest {
                     model: config.llm.primary.model.clone(),
-                    system_prompt: config.role.clone(),
+                    system_prompt: full_prompt,
                     messages: vec![
                         ChatMessage {
                             role: "user".into(),
@@ -144,6 +185,26 @@ async fn agent_main_loop(
                             response.usage.output_tokens,
                             &response.content[..response.content.len().min(100)],
                         );
+
+                        // Store important responses as memories
+                        if response.usage.output_tokens > 100 {
+                            let _ = memory_store.insert(&MemoryEntry {
+                                id: uuid::Uuid::now_v7(),
+                                agent_id: config.name.clone(),
+                                memory_type: MemoryType::ShortTerm,
+                                title: format!("Response to: {}", &msg.content[..msg.content.len().min(60)]),
+                                summary: response.content.clone(),
+                                decisions: vec![],
+                                artifacts: vec![],
+                                pending_todos: vec![],
+                                importance: 5,
+                                embedding: None,
+                                turn_indices: vec![],
+                                created_at: chrono::DateTime::<chrono::Utc>::from(SystemTime::now()),
+                                last_accessed: chrono::DateTime::<chrono::Utc>::from(SystemTime::now()),
+                                access_count: 0,
+                            }).await;
+                        }
                     }
                     Err(e) => {
                         // Try fallback model if primary fails
@@ -151,7 +212,7 @@ async fn agent_main_loop(
                             tracing::warn!("Agent {} primary LLM failed, trying fallback: {e}", config.name);
                             let fb_request = ChatRequest {
                                 model: fallback.model.clone(),
-                                system_prompt: config.role.clone(),
+                                system_prompt: base_prompt.clone(),
                                 messages: vec![
                                     ChatMessage {
                                         role: "user".into(),
