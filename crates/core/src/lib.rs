@@ -85,11 +85,11 @@ impl Core {
     pub fn start_scheduler(&mut self) {
         let assistant = self.assistant.clone();
         let handle = tokio::spawn(async move {
-            let mut tick_count: u64 = 0;
+            let mut secs_since_last_summary: u64 = 0;
 
             loop {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
-                tick_count += 1;
+                secs_since_last_summary += 30;
 
                 // Check assistant escalations (pure Rust — no LLM cost)
                 let escalations = {
@@ -108,25 +108,43 @@ impl Core {
                     }
                 }
 
-                // Periodic summary: only if there's unsummarized content and interval elapsed
-                if tick_count % 30 == 0 {
+                // Periodic summary: interval depends on current mode
+                let summary_interval = {
+                    let asst = assistant.lock().await;
+                    let policy = asst.time_policy_config.resolve(
+                        std::time::SystemTime::now()
+                            .duration_since(std::time::UNIX_EPOCH)
+                            .unwrap_or_default()
+                            .as_secs(),
+                        "",
+                    );
+                    policy.summary_interval_secs
+                };
+
+                if secs_since_last_summary >= summary_interval {
                     let has_pending = {
                         let asst = assistant.lock().await;
                         asst.has_pending_summaries()
                     };
                     if has_pending {
+                        let count = {
+                            let asst = assistant.lock().await;
+                            asst.pending_conversation_count
+                        };
                         tracing::info!(
-                            "[Scheduler] Summary tick — {} pending conversations to summarize",
+                            "[Scheduler] Summary — {} pending conversations, mode: {:?}, interval: {}s",
+                            count, 
                             {
                                 let asst = assistant.lock().await;
-                                asst.pending_conversation_count
-                            }
+                                asst.current_mode.clone()
+                            },
+                            summary_interval,
                         );
-                        // Phase 3 V3: call assistant.process_message() with a summary prompt
-                        // to generate a structured summary and reset pending_conversation_count
+                        // Phase 3 V3: call LLM to generate summary
                     } else {
-                        tracing::debug!("[Scheduler] Summary tick skipped — no pending conversations");
+                        tracing::debug!("[Scheduler] Summary skipped — no pending conversations");
                     }
+                    secs_since_last_summary = 0;
                 }
             }
         });
