@@ -34,4 +34,7 @@ pub enum CoreError {
 
     #[error("Skill error: {0}")]
     Skill(String),
+
+    #[error("MCP error: {0}")]
+    Mcp(String),
 }
