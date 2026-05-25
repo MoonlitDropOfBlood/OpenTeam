@@ -17,7 +17,7 @@ pub fn draw(f: &mut Frame, app: &App) {
 
     // Status bar
     let status_text = format!(
-        " My Virtual Company    Agents: {}/3 Running    Notifications: {}",
+        " My Virtual Company    Agents: {} loaded    Notifications: {}",
         app.agent_count, app.notification_count
     );
     let status = Paragraph::new(status_text).style(Style::default().fg(Color::Cyan));
@@ -30,10 +30,11 @@ pub fn draw(f: &mut Frame, app: &App) {
         Page::Tasks => crate::pages::tasks::draw(f, chunks[1], app),
         Page::Logs => crate::pages::logs::draw(f, chunks[1], app),
         Page::Feishu => crate::pages::feishu::draw(f, chunks[1], app),
+        Page::Memory => crate::pages::memory::draw(f, chunks[1], app),
     }
 
     // Shortcut bar
-    let shortcuts = " F1:Help  F2:Agents  F3:Tasks  F4:Logs  F5:Feishu  Q:Quit ";
+    let shortcuts = " F1:Help  F2:Agents  F3:Tasks  F4:Logs  F5:Feishu  F6:Memory  Q:Quit ";
     let shortcut = Paragraph::new(shortcuts).style(Style::default().fg(Color::DarkGray));
     f.render_widget(shortcut, chunks[2]);
 }

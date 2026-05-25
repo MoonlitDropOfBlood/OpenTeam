@@ -27,7 +27,14 @@ impl PluginManager {
         let mut running = self.running.write().await;
         *running = true;
         tracing::info!("Plugin system started");
-        // Phase 3 V2: spawn host process here via PluginHost
+
+        // Trigger startup hook
+        self.trigger_hook("system:startup", &serde_json::json!({
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        })).await;
     }
 
     /// Stop the plugin system

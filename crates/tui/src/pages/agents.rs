@@ -18,35 +18,46 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         horizontal: 2,
     });
 
-    let agents_display: Vec<Line> = app
-        .agents
-        .iter()
-        .flat_map(|agent| {
-            let is_running = agent.status != "Idle";
-            let run_icon = if is_running { "◉" } else { "○" };
-            let action = if is_running { "[Stop]" } else { "[Start]" };
+    let agents_display: Vec<Line> = if app.agents.is_empty() {
+        vec![Line::from("No agents registered. Press 'r' to refresh.")]
+    } else {
+        app.agents
+            .iter()
+            .flat_map(|agent| {
+                let is_running = agent.status != "Idle" && agent.status != "Offline" && agent.status != "Paused";
+                let run_icon = if is_running { "\u{25c9}" } else { "\u{25cb}" };
+                let action = if is_running { "[Stop]" } else { "[Start]" };
 
-            let status_color = match agent.status.as_str() {
-                "Running" => Color::Green,
-                "Busy" => Color::Yellow,
-                _ => Color::Gray,
-            };
+                let status_color = match agent.status.as_str() {
+                    "Running" | "Busy" => Color::Green,
+                    "Idle" => Color::Yellow,
+                    _ => Color::Gray,
+                };
 
-            vec![
-                Line::from(vec![
-                    format!(
-                        "{} {} ({})            ",
-                        run_icon, agent.name, agent.role
-                    )
-                    .into(),
-                    agent.status.clone().fg(status_color).into(),
-                    format!("  {} [Edit] [Delete]", action).into(),
-                ]),
-                Line::from(vec![format!("   Skills: feishu-doc, feishu-task").into()]),
-                Line::from(vec!["".into()]),
-            ]
-        })
-        .collect();
+                let skills_str = if agent.skills.is_empty() {
+                    "none".into()
+                } else {
+                    agent.skills.join(", ")
+                };
+
+                vec![
+                    Line::from(vec![
+                        format!(
+                            "{} {} ({})            ",
+                            run_icon, agent.name, agent.role
+                        )
+                        .into(),
+                        agent.status.clone().fg(status_color).into(),
+                        format!("  {} [Edit] [Delete]", action).into(),
+                    ]),
+                    Line::from(vec![
+                        format!("   Skills: {}", skills_str).into(),
+                    ]),
+                    Line::from(vec!["".into()]),
+                ]
+            })
+            .collect()
+    };
 
     let agent_block = Block::default()
         .title(format!(" Agents ({}) ", app.agents.len()))

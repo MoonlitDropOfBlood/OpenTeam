@@ -20,7 +20,21 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let agent_inner = agent_block.inner(chunks[0]);
     f.render_widget(agent_block, chunks[0]);
 
-    let cards = Paragraph::new("小红 (PM)  🟢 Running\nCodeCat (Dev)  🟡 Busy\n小蓝 (QA)  🟢 Idle")
+    let cards_text: String = if app.agents.is_empty() {
+        "No agents loaded.".into()
+    } else {
+        app.agents.iter().map(|a| {
+            let status_icon = match a.status.as_str() {
+                "Running" | "Busy" => "\u{1f7e1}",   // yellow circle
+                "Idle" => "\u{1f7e2}",                // green circle
+                "Offline" | "Paused" => "\u{26aa}",   // white circle
+                _ => "\u{1f7e0}",                     // orange circle
+            };
+            format!("{} ({})  {} {}", a.name, a.role, status_icon, a.status)
+        }).collect::<Vec<_>>().join("\n")
+    };
+
+    let cards = Paragraph::new(cards_text)
         .style(Style::default().fg(Color::White));
     f.render_widget(cards, agent_inner);
 

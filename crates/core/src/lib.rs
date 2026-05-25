@@ -67,6 +67,12 @@ impl Core {
 
     pub async fn shutdown(&self) {
         tracing::info!("Core shutting down...");
+        self.plugin_manager.trigger_hook("system:shutdown", &serde_json::json!({
+            "timestamp": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+        })).await;
         self.agent_manager.shutdown_all().await;
         self.plugin_manager.stop().await;
         tracing::info!("Core shutdown complete");

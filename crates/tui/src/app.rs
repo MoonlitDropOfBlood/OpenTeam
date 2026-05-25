@@ -5,6 +5,7 @@ pub enum Page {
     Tasks,
     Logs,
     Feishu,
+    Memory,
 }
 
 #[derive(Debug, Clone)]
@@ -12,6 +13,17 @@ pub struct AgentInfo {
     pub name: String,
     pub role: String,
     pub status: String,
+    pub skills: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MemoryDisplay {
+    pub id: String,
+    pub title: String,
+    pub summary: String,
+    pub memory_type: String,
+    pub importance: u8,
+    pub agent_name: String,
 }
 
 pub struct App {
@@ -21,22 +33,25 @@ pub struct App {
     pub agent_count: usize,
     pub notification_count: usize,
     pub agents: Vec<AgentInfo>,
+    pub feishu_connected: bool,
+    pub plugin_running: bool,
+    pub memories: Vec<MemoryDisplay>,
+    pub auto_refresh: bool,
 }
 
 impl App {
     pub fn new() -> Self {
-        let agents = vec![
-            AgentInfo { name: "小红".into(), role: "PM".into(), status: "Running".into() },
-            AgentInfo { name: "CodeCat".into(), role: "Dev".into(), status: "Busy".into() },
-            AgentInfo { name: "小蓝".into(), role: "QA".into(), status: "Idle".into() },
-        ];
         Self {
             current_page: Page::Home,
             should_quit: false,
             message_log: Vec::new(),
-            agent_count: agents.len(),
+            agent_count: 0,
             notification_count: 0,
-            agents,
+            agents: Vec::new(),
+            feishu_connected: false,
+            plugin_running: false,
+            memories: Vec::new(),
+            auto_refresh: true,
         }
     }
 
