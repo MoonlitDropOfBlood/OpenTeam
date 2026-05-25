@@ -31,4 +31,7 @@ pub enum CoreError {
 
     #[error("Assistant error: {0}")]
     Assistant(String),
+
+    #[error("Skill error: {0}")]
+    Skill(String),
 }

@@ -8,6 +8,7 @@ pub mod agent;
 pub mod router;
 pub mod assistant;
 pub mod plugin;
+pub mod skill;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -25,6 +26,7 @@ pub struct Core {
     pub router: router::router::MessageRouter,
     pub assistant: Arc<Mutex<assistant::assistant::AssistantAgent>>,
     pub plugin_manager: plugin::manager::PluginManager,
+    pub skill_registry: skill::registry::SkillRegistry,
     scheduler_handle: Option<JoinHandle<()>>,
 }
 
@@ -49,6 +51,10 @@ impl Core {
         let assistant = Arc::new(Mutex::new(assistant::assistant::AssistantAgent::new()));
         let plugin_manager = plugin::manager::PluginManager::new();
 
+        // Discover skills
+        let skills_dir = Path::new("skills");
+        let skill_registry = skill::registry::SkillRegistry::discover(skills_dir)?;
+
         Ok(Self {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
@@ -58,6 +64,7 @@ impl Core {
             router,
             assistant,
             plugin_manager,
+            skill_registry,
             scheduler_handle: None,
         })
     }
@@ -79,6 +86,11 @@ impl Core {
     ) -> Result<Vec<assistant::types::AssistantAction>, CoreError> {
         let mut asst = self.assistant.lock().await;
         asst.process_message(message, sender, &self.llm_gateway, model).await
+    }
+
+    /// Build the system prompt for an agent by injecting relevant skill instructions
+    pub fn build_agent_prompt(&self, role: &str, skill_names: &[String]) -> String {
+        self.skill_registry.build_system_prompt(role, skill_names)
     }
 
     /// Start the background scheduler that drives assistant periodic tasks
