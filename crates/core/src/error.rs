@@ -28,4 +28,7 @@ pub enum CoreError {
 
     #[error("Plugin error: {0}")]
     Plugin(String),
+
+    #[error("Assistant error: {0}")]
+    Assistant(String),
 }

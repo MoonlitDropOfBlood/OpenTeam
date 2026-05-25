@@ -65,6 +65,19 @@ impl Core {
         self.registry.all()
     }
 
+    /// Process a message through the assistant (convenience method)
+    /// Phase 3 V2: proper async mutex on assistant for interior mutability
+    pub async fn process_with_assistant(
+        &self,
+        _message: &str,
+        _sender: &str,
+        _model: &config::agent::ModelConfig,
+    ) -> Result<Vec<assistant::types::AssistantAction>, CoreError> {
+        tracing::info!("[Core] Assistant message processing (stub — Phase 3 V2)");
+        // Phase 3 V2: wrap assistant in Arc<Mutex<>> for interior mutability
+        Ok(Vec::new())
+    }
+
     pub async fn shutdown(&self) {
         tracing::info!("Core shutting down...");
         self.plugin_manager.trigger_hook("system:shutdown", &serde_json::json!({
