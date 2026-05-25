@@ -4,6 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use crate::config::agent::AgentConfig;
+use crate::llm::gateway::{LlmGateway, ChatRequest, ChatMessage};
 use crate::registry::{AgentId, AgentRegistry};
 use super::handle::*;
 use super::inbox::*;
@@ -25,6 +26,7 @@ impl AgentManager {
         &self,
         config: AgentConfig,
         _registry: Arc<RwLock<AgentRegistry>>,
+        llm_gateway: Arc<LlmGateway>,
     ) -> AgentId {
         let id = uuid::Uuid::now_v7();
         let (control_tx, mut control_rx) = mpsc::channel::<AgentCommand>(64);
@@ -32,9 +34,10 @@ impl AgentManager {
         let cancel_clone = cancel_token.clone();
         let config_clone = config.clone();
         let id_clone = id;
+        let llm_gateway_clone = llm_gateway;
 
         let handle = tokio::spawn(async move {
-            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone).await;
+            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone, llm_gateway_clone).await;
         });
 
         let agent_handle = AgentHandle {
@@ -75,6 +78,7 @@ async fn agent_main_loop(
     _id: AgentId,
     control_rx: &mut mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
+    llm_gateway: Arc<LlmGateway>,
 ) {
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
@@ -116,12 +120,56 @@ async fn agent_main_loop(
             }
         }
 
-        // Process inbox if not paused
+        // Process inbox if not paused — actual LLM processing with fallback
         if !is_paused {
             while let Some(msg) = inbox.pop() {
-                tracing::info!("Agent {} processing message (pri={}): {:?}",
-                    config.name, msg.priority, &msg.content[..msg.content.len().min(60)]);
-                // Phase 2 V1: just log — actual LLM processing comes later
+                tracing::info!("Agent {} processing message (pri={})", config.name, msg.priority);
+
+                // Build LLM request from agent config
+                let request = ChatRequest {
+                    model: config.llm.primary.model.clone(),
+                    system_prompt: config.role.clone(),
+                    messages: vec![
+                        ChatMessage {
+                            role: "user".into(),
+                            content: msg.content.clone(),
+                        },
+                    ],
+                };
+
+                match llm_gateway.chat(&config.llm.primary, &request).await {
+                    Ok(response) => {
+                        tracing::info!("Agent {} LLM response ({} tokens): {}",
+                            config.name,
+                            response.usage.output_tokens,
+                            &response.content[..response.content.len().min(100)],
+                        );
+                    }
+                    Err(e) => {
+                        // Try fallback model if primary fails
+                        if let Some(ref fallback) = config.llm.fallback {
+                            tracing::warn!("Agent {} primary LLM failed, trying fallback: {e}", config.name);
+                            let fb_request = ChatRequest {
+                                model: fallback.model.clone(),
+                                system_prompt: config.role.clone(),
+                                messages: vec![
+                                    ChatMessage {
+                                        role: "user".into(),
+                                        content: msg.content.clone(),
+                                    },
+                                ],
+                            };
+                            match llm_gateway.chat(fallback, &fb_request).await {
+                                Ok(resp) => tracing::info!("Agent {} fallback response: {}",
+                                    config.name,
+                                    &resp.content[..resp.content.len().min(100)]),
+                                Err(e2) => tracing::error!("Agent {} both LLMs failed: primary={e}, fallback={e2}", config.name),
+                            }
+                        } else {
+                            tracing::error!("Agent {} LLM call failed: {e}", config.name);
+                        }
+                    }
+                }
             }
         }
     }

@@ -26,7 +26,8 @@ impl PluginManager {
     pub async fn start(&self) {
         let mut running = self.running.write().await;
         *running = true;
-        tracing::info!("Plugin system started (Phase 3 V1: stub)");
+        tracing::info!("Plugin system started");
+        // Phase 3 V2: spawn host process here via PluginHost
     }
 
     /// Stop the plugin system
