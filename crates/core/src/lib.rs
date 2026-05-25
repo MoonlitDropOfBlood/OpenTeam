@@ -9,6 +9,7 @@ pub mod router;
 pub mod assistant;
 pub mod plugin;
 pub mod skill;
+pub mod mcp;
 
 use std::path::Path;
 use std::sync::Arc;
@@ -27,8 +28,10 @@ pub struct Core {
     pub assistant: Arc<Mutex<assistant::assistant::AssistantAgent>>,
     pub plugin_manager: plugin::manager::PluginManager,
     pub skill_registry: Arc<RwLock<skill::registry::SkillRegistry>>,
+    pub mcp_registry: Arc<RwLock<mcp::registry::McpRegistry>>,
     scheduler_handle: Option<JoinHandle<()>>,
     watcher_handle: Option<JoinHandle<()>>,
+    mcp_watcher_handle: Option<JoinHandle<()>>,
 }
 
 impl Core {
@@ -90,6 +93,23 @@ impl Core {
             }
         }
 
+        // Discover MCP servers: global + assistant + per-agent
+        let global_mcp_dir = mcp::registry::global_mcp_dir();
+        let asst_mcp_dir = mcp::registry::assistant_mcp_dir();
+        let mut mcp_dirs = vec![global_mcp_dir.clone()];
+        if asst_mcp_dir.exists() {
+            mcp_dirs.push(asst_mcp_dir.clone());
+        }
+        for record in registry.all() {
+            let agent_mcp_dir = agents_dir.join(&record.config.name).join("mcps");
+            if agent_mcp_dir.exists() {
+                mcp_dirs.push(agent_mcp_dir);
+            }
+        }
+        let mcp_registry = Arc::new(RwLock::new(
+            mcp::registry::McpRegistry::discover_all(&mcp_dirs)?
+        ));
+
         Ok(Self {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
@@ -100,8 +120,10 @@ impl Core {
             assistant,
             plugin_manager,
             skill_registry,
+            mcp_registry,
             scheduler_handle: None,
             watcher_handle: None,
+            mcp_watcher_handle: None,
         })
     }
 
@@ -145,6 +167,29 @@ impl Core {
         ) {
             self.watcher_handle = Some(watcher);
             tracing::info!("Skill file watcher started");
+        }
+
+        // Start MCP file watcher
+        let mcp_registry = self.mcp_registry.clone();
+        let global_mcp_dir = mcp::registry::global_mcp_dir();
+        let asst_mcp_dir = mcp::registry::assistant_mcp_dir();
+        let mut mcp_watch_dirs = vec![global_mcp_dir];
+        if asst_mcp_dir.exists() {
+            mcp_watch_dirs.push(asst_mcp_dir);
+        }
+        for record in self.registry.all() {
+            let agents_dir = std::path::PathBuf::from("agents");
+            let agent_mcp_dir = agents_dir.join(&record.config.name).join("mcps");
+            if agent_mcp_dir.exists() {
+                mcp_watch_dirs.push(agent_mcp_dir);
+            }
+        }
+        if let Ok(watcher) = mcp::registry::McpRegistry::start_watcher(
+            mcp_registry,
+            mcp_watch_dirs,
+        ) {
+            self.mcp_watcher_handle = Some(watcher);
+            tracing::info!("MCP file watcher started");
         }
 
         // Start scheduler task
