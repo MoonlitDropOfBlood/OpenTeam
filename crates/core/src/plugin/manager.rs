@@ -62,3 +62,55 @@ impl PluginManager {
         *self.running.read().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_plugin_manager_start_stop() {
+        let pm = PluginManager::new();
+        assert!(!pm.is_running().await);
+        pm.start().await;
+        assert!(pm.is_running().await);
+        pm.stop().await;
+        assert!(!pm.is_running().await);
+    }
+
+    #[tokio::test]
+    async fn test_register_and_trigger_hook() {
+        let pm = PluginManager::new();
+        pm.register_hook(HookRegistration {
+            plugin_name: "test".into(),
+            hook_point: "message:received".into(),
+            handler_id: "handler-1".into(),
+        }).await;
+
+        let payload = serde_json::json!({"content": "hello"});
+        let results = pm.trigger_hook("message:received", &payload).await;
+        assert_eq!(results.len(), 1, "Should trigger 1 handler");
+        assert_eq!(results[0]["plugin"], "test");
+
+        // Unregistered hook returns empty
+        let no_results = pm.trigger_hook("nonexistent", &payload).await;
+        assert!(no_results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_multiple_hooks_same_point() {
+        let pm = PluginManager::new();
+        pm.register_hook(HookRegistration {
+            plugin_name: "a".into(),
+            hook_point: "system:startup".into(),
+            handler_id: "h1".into(),
+        }).await;
+        pm.register_hook(HookRegistration {
+            plugin_name: "b".into(),
+            hook_point: "system:startup".into(),
+            handler_id: "h2".into(),
+        }).await;
+
+        let results = pm.trigger_hook("system:startup", &serde_json::json!({})).await;
+        assert_eq!(results.len(), 2);
+    }
+}

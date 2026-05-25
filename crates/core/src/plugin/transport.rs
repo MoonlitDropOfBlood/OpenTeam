@@ -37,3 +37,42 @@ pub async fn send_request(request: &JsonRpcRequest) -> Result<JsonRpcResponse, S
         error: None,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_json_rpc_roundtrip() {
+        let req = JsonRpcRequest {
+            jsonrpc: "2.0".into(),
+            id: 42,
+            method: "ping".into(),
+            params: serde_json::json!({}),
+        };
+
+        // Verify serialization roundtrip
+        let json = serde_json::to_string(&req).unwrap();
+        let parsed: JsonRpcRequest = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.id, 42);
+        assert_eq!(parsed.method, "ping");
+
+        // Verify stub response
+        let resp = send_request(&req).await.unwrap();
+        assert_eq!(resp.id, 42);
+        assert!(resp.error.is_none());
+        assert!(resp.result.is_some());
+    }
+
+    #[test]
+    fn test_json_rpc_error_serde() {
+        let err = JsonRpcError {
+            code: -32601,
+            message: "Method not found".into(),
+            data: None,
+        };
+        let json = serde_json::to_string(&err).unwrap();
+        assert!(json.contains("-32601"));
+        assert!(json.contains("Method not found"));
+    }
+}
