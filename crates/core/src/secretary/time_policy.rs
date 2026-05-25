@@ -135,4 +135,29 @@ mod tests {
         let policy = config.resolve(sat_14h, "普通需求");
         assert_eq!(policy.wake_mode, WakeMode::Passive);
     }
+
+    #[test]
+    fn test_urgent_english_keyword() {
+        let config = TimePolicyConfig::default();
+        let mon_14h: u64 = 1779976800;
+        let policy = config.resolve(mon_14h, "urgent bug fix needed");
+        assert_eq!(policy.wake_mode, WakeMode::Immediate);
+    }
+
+    #[test]
+    fn test_monday_morning_busy() {
+        let config = TimePolicyConfig::default();
+        let mon_09h: u64 = 1779958800;
+        let policy = config.resolve(mon_09h, "需求分析");
+        assert_eq!(policy.wake_mode, WakeMode::Proactive);
+    }
+
+    #[test]
+    fn test_friday_evening_idle() {
+        let config = TimePolicyConfig::default();
+        // Friday 2026-05-29 19:00:00 UTC
+        let fri_19h: u64 = 1780268400;
+        let policy = config.resolve(fri_19h, "普通任务");
+        assert_eq!(policy.wake_mode, WakeMode::Passive);
+    }
 }

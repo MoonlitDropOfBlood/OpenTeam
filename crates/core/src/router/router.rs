@@ -53,3 +53,19 @@ impl MessageRouter {
         self.agent_senders.len()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_register_and_count() {
+        let mut router = MessageRouter::new();
+        let (tx, _rx) = tokio::sync::mpsc::channel(64);
+        let id = uuid::Uuid::now_v7();
+        router.register_agent(id, tx);
+        assert_eq!(router.agent_count(), 1);
+        router.unregister_agent(&id);
+        assert_eq!(router.agent_count(), 0);
+    }
+}

@@ -119,3 +119,106 @@ pub fn validate_compression(entry: &MemoryEntry) -> Result<(), Vec<String>> {
     if entry.summary.is_empty() { errors.push("summary is required".into()); }
     if errors.is_empty() { Ok(()) } else { Err(errors) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn make_turn(sender: &str, content: &str) -> ConversationTurn {
+        ConversationTurn {
+            sender: sender.to_string(),
+            content: content.to_string(),
+            timestamp: chrono::DateTime::from(std::time::SystemTime::now()),
+        }
+    }
+
+    #[test]
+    fn test_rule_based_compression_short() {
+        let compressor = Compressor::new();
+        let turns = vec![
+            make_turn("小红", "我决定使用JWT方案"),
+            make_turn("CodeCat", "同意，性能更好"),
+        ];
+        let result = compressor.compress(&turns, 5, "小红");
+        match result {
+            CompressionResult::Success(entry) => {
+                assert!(!entry.title.is_empty());
+                assert!(!entry.summary.is_empty());
+                assert_eq!(entry.importance, 5);
+                assert_eq!(entry.agent_id, "小红");
+                assert_eq!(entry.turn_indices.len(), 2);
+            }
+            CompressionResult::Failed { error, .. } => {
+                panic!("Compression failed: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_rule_based_extracts_decision() {
+        let compressor = Compressor::new();
+        let turns = vec![
+            make_turn("小红", "经过讨论，决定使用Redis缓存"),
+        ];
+        let result = compressor.compress(&turns, 7, "小红");
+        match result {
+            CompressionResult::Success(entry) => {
+                assert!(!entry.decisions.is_empty(), "Should have extracted a decision");
+                assert!(entry.decisions[0].decision.contains("Redis"));
+            }
+            CompressionResult::Failed { error, .. } => {
+                panic!("Compression failed: {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn test_validate_compression_valid() {
+        let entry = MemoryEntry {
+            id: uuid::Uuid::now_v7(),
+            agent_id: "test".into(),
+            memory_type: MemoryType::ShortTerm,
+            title: "Valid Title".into(),
+            summary: "Valid summary".into(),
+            decisions: vec![],
+            artifacts: vec![],
+            pending_todos: vec![],
+            importance: 5,
+            embedding: None,
+            turn_indices: vec![],
+            created_at: chrono::DateTime::from(std::time::SystemTime::now()),
+            last_accessed: chrono::DateTime::from(std::time::SystemTime::now()),
+            access_count: 0,
+        };
+        assert!(validate_compression(&entry).is_ok());
+    }
+
+    #[test]
+    fn test_validate_compression_empty_title() {
+        let entry = MemoryEntry {
+            title: "".into(),
+            summary: "valid".into(),
+            ..create_minimal()
+        };
+        assert!(validate_compression(&entry).is_err());
+    }
+
+    fn create_minimal() -> MemoryEntry {
+        MemoryEntry {
+            id: uuid::Uuid::now_v7(),
+            agent_id: "test".into(),
+            memory_type: MemoryType::ShortTerm,
+            title: "t".into(),
+            summary: "s".into(),
+            decisions: vec![],
+            artifacts: vec![],
+            pending_todos: vec![],
+            importance: 5,
+            embedding: None,
+            turn_indices: vec![],
+            created_at: chrono::DateTime::from(std::time::SystemTime::now()),
+            last_accessed: chrono::DateTime::from(std::time::SystemTime::now()),
+            access_count: 0,
+        }
+    }
+}

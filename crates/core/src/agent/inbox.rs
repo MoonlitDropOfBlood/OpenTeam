@@ -55,3 +55,50 @@ impl PriorityInbox {
         self.queue.is_empty()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn msg(priority: u8, content: &str) -> InboxMessage {
+        InboxMessage {
+            priority,
+            content: content.to_string(),
+            received_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+        }
+    }
+
+    #[test]
+    fn test_priority_ordering() {
+        let mut inbox = PriorityInbox::new();
+        inbox.push(msg(3, "low"));
+        inbox.push(msg(0, "high"));
+        inbox.push(msg(1, "medium"));
+
+        assert_eq!(inbox.pop().unwrap().content, "high");
+        assert_eq!(inbox.pop().unwrap().content, "medium");
+        assert_eq!(inbox.pop().unwrap().content, "low");
+        assert!(inbox.is_empty());
+    }
+
+    #[test]
+    fn test_empty_inbox() {
+        let mut inbox = PriorityInbox::new();
+        assert!(inbox.is_empty());
+        assert_eq!(inbox.len(), 0);
+        assert!(inbox.pop().is_none());
+    }
+
+    #[test]
+    fn test_same_priority_fifo() {
+        let mut inbox = PriorityInbox::new();
+        inbox.push(msg(1, "first"));
+        std::thread::sleep(std::time::Duration::from_millis(2));
+        inbox.push(msg(1, "second"));
+        assert_eq!(inbox.pop().unwrap().content, "first");
+        assert_eq!(inbox.pop().unwrap().content, "second");
+    }
+}
