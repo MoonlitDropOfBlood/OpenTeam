@@ -1,2 +1,2 @@
-pub mod secretary;
+pub mod assistant;
 pub mod time_policy;

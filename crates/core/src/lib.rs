@@ -6,7 +6,7 @@ pub mod error;
 pub mod memory;
 pub mod agent;
 pub mod router;
-pub mod secretary;
+pub mod assistant;
 pub mod plugin;
 
 use std::path::Path;
@@ -20,7 +20,7 @@ pub struct Core {
     pub memory_store: memory::store::MemoryStore,
     pub agent_manager: agent::manager::AgentManager,
     pub router: router::router::MessageRouter,
-    pub secretary: secretary::secretary::SecretaryAgent,
+    pub assistant: assistant::assistant::AssistantAgent,
     pub plugin_manager: plugin::manager::PluginManager,
 }
 
@@ -42,7 +42,7 @@ impl Core {
 
         let agent_manager = agent::manager::AgentManager::new();
         let router = router::router::MessageRouter::new();
-        let secretary = secretary::secretary::SecretaryAgent::new();
+        let assistant = assistant::assistant::AssistantAgent::new();
         let plugin_manager = plugin::manager::PluginManager::new();
 
         Ok(Self {
@@ -52,7 +52,7 @@ impl Core {
             memory_store,
             agent_manager,
             router,
-            secretary,
+            assistant,
             plugin_manager,
         })
     }

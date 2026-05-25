@@ -32,7 +32,7 @@
 │                           │       飞书平台          │
 │                ┌──────────▼───────────────────┐   │
 │                │        飞书群聊（协作可见层）     │   │
-│                │ 秘书: "PRD 写好了，请过目"      │   │
+│                │ 助理: "PRD 写好了，请过目"      │   │
 │                │ 用户: "@Dev 直接按方案 A 做"   │   │
 │                └──────────────────────────────┘   │
 └──────────────────────────────────────────────────┘
@@ -42,8 +42,8 @@
 
 ### Agent 系统
 - **自定义 Agent**：通过 YAML 定义角色、性格、LLM 配置、触发词
-- **秘书 Agent**：主 Agent，忙时主动推进，闲时静默归档，紧急关键词立即唤醒
-- **双通道通信**：用户可 @秘书（日常协调）或直接 @任意 Agent（最高优先级）
+- **助理 Agent**：主 Agent，忙时主动推进，闲时静默归档，紧急关键词立即唤醒
+- **双通道通信**：用户可 @助理（日常协调）或直接 @任意 Agent（最高优先级）
 - **忙闲感知**：周一至周五 9:00-18:00 忙时模式，其余时间闲时模式，紧急关键词覆盖一切
 
 ### 记忆系统
@@ -272,7 +272,7 @@ cd plugins/host && node src/index.js
 │   │       ├── memory/            # 记忆系统（三层）
 │   │       ├── agent/             # Agent 生命周期管理
 │   │       ├── router/            # 消息路由
-│   │       ├── secretary/         # 秘书 Agent
+│   │       ├── assistant/         # 助理 Agent
 │   │       ├── plugin/            # 插件管理器
 │   │       ├── error.rs           # 统一错误类型
 │   │       └── lib.rs             # Core 入口
@@ -329,7 +329,7 @@ cargo test --lib
 
 # 运行特定模块测试
 cargo test memory::forgetting
-cargo test secretary::time_policy
+cargo test assistant::time_policy
 
 # 运行冒烟测试
 cargo test --test smoke_test
@@ -340,7 +340,7 @@ cargo test --test smoke_test
 | 阶段 | 状态 | 内容 |
 |------|------|------|
 | Phase 1 | ✅ 完成 | Rust Core 脚手架、Agent 配置/注册表、LLM Gateway、飞书 Bridge |
-| Phase 2 | ✅ 完成 | 记忆系统（三层 + 遗忘）、Agent 生命周期、消息路由、秘书 Agent |
+| Phase 2 | ✅ 完成 | 记忆系统（三层 + 遗忘）、Agent 生命周期、消息路由、助理 Agent |
 | Phase 3 | ✅ 完成 | TUI 界面（5 页面）、Plugin 系统（Node.js 宿主 + Hook） |
 | 清理优化 | ✅ 完成 | 49 测试覆盖、TUI 连接真实数据、Agent LLM 调用、自动刷新、记忆浏览器 |
 

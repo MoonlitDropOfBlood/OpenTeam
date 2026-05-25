@@ -1,11 +1,11 @@
 use super::time_policy::*;
 
-pub struct SecretaryAgent {
+pub struct AssistantAgent {
     pub time_policy_config: TimePolicyConfig,
     pub current_mode: WakeMode,
 }
 
-impl SecretaryAgent {
+impl AssistantAgent {
     pub fn new() -> Self {
         Self {
             time_policy_config: TimePolicyConfig::default(),

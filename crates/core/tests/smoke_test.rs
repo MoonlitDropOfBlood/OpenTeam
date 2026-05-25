@@ -78,11 +78,11 @@ async fn test_memory_insert_and_retrieve() {
 }
 
 #[tokio::test]
-async fn test_secretary_time_policy() {
+async fn test_assistant_time_policy() {
     let agents_dir = Path::new("../../agents");
     let llm_config = Path::new("../../llm_config.yaml");
     if !agents_dir.exists() || !llm_config.exists() {
-        eprintln!("Skipping secretary test: configs not found");
+        eprintln!("Skipping assistant test: configs not found");
         return;
     }
 
@@ -93,9 +93,9 @@ async fn test_secretary_time_policy() {
     let db_path = tmp.to_string_lossy().replace('\\', "/");
 
     let core = Core::new(agents_dir, llm_config, &db_path).await.unwrap();
-    let urgent = core.secretary.is_urgent("紧急！线上挂了");
+    let urgent = core.assistant.is_urgent("紧急！线上挂了");
     assert!(urgent, "Should detect urgent keywords");
-    let normal = core.secretary.is_urgent("写个PRD需求");
+    let normal = core.assistant.is_urgent("写个PRD需求");
     assert!(!normal, "Should not flag normal messages as urgent");
 }
 
