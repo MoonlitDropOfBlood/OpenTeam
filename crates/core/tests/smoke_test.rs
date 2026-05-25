@@ -93,9 +93,9 @@ async fn test_assistant_time_policy() {
     let db_path = tmp.to_string_lossy().replace('\\', "/");
 
     let core = Core::new(agents_dir, llm_config, &db_path).await.unwrap();
-    let urgent = core.assistant.is_urgent("紧急！线上挂了");
+    let urgent = core.assistant.lock().await.is_urgent("紧急！线上挂了");
     assert!(urgent, "Should detect urgent keywords");
-    let normal = core.assistant.is_urgent("写个PRD需求");
+    let normal = core.assistant.lock().await.is_urgent("写个PRD需求");
     assert!(!normal, "Should not flag normal messages as urgent");
 }
 

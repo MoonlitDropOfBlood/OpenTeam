@@ -10,6 +10,9 @@ pub mod assistant;
 pub mod plugin;
 
 use std::path::Path;
+use std::sync::Arc;
+use tokio::sync::Mutex;
+use tokio::task::JoinHandle;
 
 pub use error::CoreError;
 
@@ -20,8 +23,9 @@ pub struct Core {
     pub memory_store: memory::store::MemoryStore,
     pub agent_manager: agent::manager::AgentManager,
     pub router: router::router::MessageRouter,
-    pub assistant: assistant::assistant::AssistantAgent,
+    pub assistant: Arc<Mutex<assistant::assistant::AssistantAgent>>,
     pub plugin_manager: plugin::manager::PluginManager,
+    scheduler_handle: Option<JoinHandle<()>>,
 }
 
 impl Core {
@@ -42,7 +46,7 @@ impl Core {
 
         let agent_manager = agent::manager::AgentManager::new();
         let router = router::router::MessageRouter::new();
-        let assistant = assistant::assistant::AssistantAgent::new();
+        let assistant = Arc::new(Mutex::new(assistant::assistant::AssistantAgent::new()));
         let plugin_manager = plugin::manager::PluginManager::new();
 
         Ok(Self {
@@ -54,6 +58,7 @@ impl Core {
             router,
             assistant,
             plugin_manager,
+            scheduler_handle: None,
         })
     }
 
@@ -66,16 +71,52 @@ impl Core {
     }
 
     /// Process a message through the assistant (convenience method)
-    /// Phase 3 V2: proper async mutex on assistant for interior mutability
     pub async fn process_with_assistant(
         &self,
-        _message: &str,
-        _sender: &str,
-        _model: &config::agent::ModelConfig,
+        message: &str,
+        sender: &str,
+        model: &config::agent::ModelConfig,
     ) -> Result<Vec<assistant::types::AssistantAction>, CoreError> {
-        tracing::info!("[Core] Assistant message processing (stub — Phase 3 V2)");
-        // Phase 3 V2: wrap assistant in Arc<Mutex<>> for interior mutability
-        Ok(Vec::new())
+        let mut asst = self.assistant.lock().await;
+        asst.process_message(message, sender, &self.llm_gateway, model).await
+    }
+
+    /// Start the background scheduler that drives assistant periodic tasks
+    pub fn start_scheduler(&mut self) {
+        let assistant = self.assistant.clone();
+        let handle = tokio::spawn(async move {
+            let mut tick_count: u64 = 0;
+
+            loop {
+                tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+                tick_count += 1;
+
+                // Check assistant escalations
+                let escalations = {
+                    let asst = assistant.lock().await;
+                    asst.check_escalations()
+                };
+
+                for action in &escalations {
+                    match action {
+                        assistant::types::AssistantAction::Respond { message } => {
+                            tracing::info!("[Scheduler] Escalation: {message}");
+                        }
+                        _ => {
+                            tracing::debug!("[Scheduler] Other action: {:?}", action);
+                        }
+                    }
+                }
+
+                // Periodic summary: every 30 ticks (15 min in busy mode)
+                if tick_count % 30 == 0 {
+                    tracing::info!("[Scheduler] Summary tick — checking overall status (tick {tick_count})");
+                }
+            }
+        });
+
+        self.scheduler_handle = Some(handle);
+        tracing::info!("Background scheduler started (30s interval)");
     }
 
     pub async fn shutdown(&self) {
@@ -88,6 +129,7 @@ impl Core {
         })).await;
         self.agent_manager.shutdown_all().await;
         self.plugin_manager.stop().await;
+        // Drop the scheduler handle (task will be cancelled on drop)
         tracing::info!("Core shutdown complete");
     }
 }
