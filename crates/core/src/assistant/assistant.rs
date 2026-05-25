@@ -21,6 +21,8 @@ pub struct AssistantAgent {
     pub role: String,
     pub conversation_log: Vec<ChatMessage>,
     pub active_tasks: Vec<TaskTracking>,
+    /// Number of conversations processed since last summary LLM call
+    pub pending_conversation_count: u32,
 }
 
 impl AssistantAgent {
@@ -31,7 +33,13 @@ impl AssistantAgent {
             role: Self::default_role().into(),
             conversation_log: Vec::new(),
             active_tasks: Vec::new(),
+            pending_conversation_count: 0,
         }
+    }
+
+    /// Returns true if there are unsummarized conversations worth a summary LLM call
+    pub fn has_pending_summaries(&self) -> bool {
+        self.pending_conversation_count >= 3
     }
 
     pub fn default_role() -> &'static str {
@@ -104,6 +112,9 @@ actions 中的每条指令必须包含 type 字段：
             role: "assistant".into(),
             content: response.content.clone(),
         });
+
+        // Mark this conversation as needing summarization
+        self.pending_conversation_count += 1;
 
         // Parse JSON response
         let content = response.content.trim();

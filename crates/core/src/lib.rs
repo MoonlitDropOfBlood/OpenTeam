@@ -91,7 +91,7 @@ impl Core {
                 tokio::time::sleep(std::time::Duration::from_secs(30)).await;
                 tick_count += 1;
 
-                // Check assistant escalations
+                // Check assistant escalations (pure Rust — no LLM cost)
                 let escalations = {
                     let asst = assistant.lock().await;
                     asst.check_escalations()
@@ -108,9 +108,25 @@ impl Core {
                     }
                 }
 
-                // Periodic summary: every 30 ticks (15 min in busy mode)
+                // Periodic summary: only if there's unsummarized content and interval elapsed
                 if tick_count % 30 == 0 {
-                    tracing::info!("[Scheduler] Summary tick — checking overall status (tick {tick_count})");
+                    let has_pending = {
+                        let asst = assistant.lock().await;
+                        asst.has_pending_summaries()
+                    };
+                    if has_pending {
+                        tracing::info!(
+                            "[Scheduler] Summary tick — {} pending conversations to summarize",
+                            {
+                                let asst = assistant.lock().await;
+                                asst.pending_conversation_count
+                            }
+                        );
+                        // Phase 3 V3: call assistant.process_message() with a summary prompt
+                        // to generate a structured summary and reset pending_conversation_count
+                    } else {
+                        tracing::debug!("[Scheduler] Summary tick skipped — no pending conversations");
+                    }
                 }
             }
         });
