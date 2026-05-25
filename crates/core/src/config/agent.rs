@@ -8,8 +8,6 @@ pub struct AgentConfig {
     pub llm: LlmAgentConfig,
     pub triggers: Vec<TriggerConfig>,
     #[serde(default)]
-    pub skills: Vec<String>,
-    #[serde(default)]
     pub mcps: Vec<String>,
 }
 

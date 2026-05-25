@@ -11,6 +11,7 @@ pub struct SkillDef {
 }
 
 /// Auto-discovers and serves skills from a directory
+#[derive(Clone)]
 pub struct SkillRegistry {
     skills: HashMap<String, SkillDef>,
 }
@@ -103,33 +104,53 @@ impl SkillRegistry {
         self.skills.values().collect()
     }
 
-    /// Build the complete system prompt for an agent by injecting relevant skill instructions
-    pub fn build_system_prompt(&self, role: &str, skill_names: &[String]) -> String {
+    /// Merge skills from another registry into this one
+    pub fn merge(&mut self, other: Self) {
+        for (name, skill) in other.skills {
+            self.skills.entry(name).or_insert(skill);
+        }
+    }
+
+    /// Build the complete system prompt with ALL skills in this registry injected
+    pub fn build_system_prompt(&self, role: &str) -> String {
         let mut prompt = role.to_string();
         prompt.push_str("\n\n");
 
-        if skill_names.is_empty() {
-            prompt.push_str("你没有绑定任何技能。");
+        let all_skills: Vec<&SkillDef> = self.skills.values().collect();
+        if all_skills.is_empty() {
             return prompt;
         }
 
         prompt.push_str("## 可用技能\n\n");
         prompt.push_str("你有以下技能可用，根据需求选择合适的技能，严格按照技能说明执行。\n\n");
 
-        for name in skill_names {
-            if let Some(skill) = self.skills.get(name) {
-                prompt.push_str(&format!("### {}\n", skill.name));
-                if !skill.description.is_empty() {
-                    prompt.push_str(&format!("{}\n\n", skill.description));
-                }
-                prompt.push_str(&format!("{}\n\n", skill.instructions));
-            } else {
-                prompt.push_str(&format!("### {}\n（技能未加载）\n\n", name));
+        for skill in &all_skills {
+            prompt.push_str(&format!("### {}\n", skill.name));
+            if !skill.description.is_empty() {
+                prompt.push_str(&format!("{}\n\n", skill.description));
             }
+            prompt.push_str(&format!("{}\n\n", skill.instructions));
         }
 
         prompt
     }
+}
+
+fn home_dir() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."))
+}
+
+/// Get the global skills directory path (~/.config/OpenTeam/skills/)
+pub fn global_skills_dir() -> std::path::PathBuf {
+    home_dir().join(".config/OpenTeam/skills")
+}
+
+/// Get the assistant skills directory path (~/.config/OpenTeam/assistant/skills/)
+pub fn assistant_skills_dir() -> std::path::PathBuf {
+    home_dir().join(".config/OpenTeam/assistant/skills")
 }
 
 #[cfg(test)]
@@ -180,7 +201,7 @@ Create Feishu documents."#;
         f.write_all(content.as_bytes()).unwrap();
 
         let registry = SkillRegistry::discover(&tmp).unwrap();
-        let prompt = registry.build_system_prompt("你是产品经理", &["feishu-doc".to_string()]);
+        let prompt = registry.build_system_prompt("你是产品经理");
         assert!(prompt.contains("你是产品经理"));
         assert!(prompt.contains("feishu-doc"));
         assert!(prompt.contains("Create Feishu documents"));

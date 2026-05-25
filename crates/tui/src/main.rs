@@ -25,7 +25,6 @@ async fn refresh_from_core(app: &mut App, core: &Core) {
             name: record.config.name.clone(),
             role: record.config.role.clone(),
             status: status_str.into(),
-            skills: record.config.skills.clone(),
         }
     }).collect();
     app.agent_count = app.agents.len();

@@ -13,7 +13,6 @@ pub struct AgentInfo {
     pub name: String,
     pub role: String,
     pub status: String,
-    pub skills: Vec<String>,
 }
 
 #[derive(Debug, Clone)]

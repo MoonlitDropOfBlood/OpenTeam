@@ -19,7 +19,4 @@ triggers:
     auto_respond: true
   - pattern: "@PM|@小红"
     auto_respond: true
-skills:
-  - feishu-doc
-  - feishu-task
 mcps: []

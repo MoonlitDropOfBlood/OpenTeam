@@ -51,9 +51,31 @@ impl Core {
         let assistant = Arc::new(Mutex::new(assistant::assistant::AssistantAgent::new()));
         let plugin_manager = plugin::manager::PluginManager::new();
 
-        // Discover skills
-        let skills_dir = Path::new("skills");
-        let skill_registry = Arc::new(skill::registry::SkillRegistry::discover(skills_dir)?);
+        // Discover global skills
+        let global_skills_dir = skill::registry::global_skills_dir();
+        let mut skill_registry = skill::registry::SkillRegistry::discover(&global_skills_dir)?;
+
+        // Discover per-agent skills
+        for record in registry.all() {
+            let agent_skills_dir = agents_dir.join(&record.config.name).join("skills");
+            if agent_skills_dir.exists() {
+                tracing::info!("Discovering per-agent skills for {} from {:?}", record.config.name, agent_skills_dir);
+                if let Ok(agent_skills) = skill::registry::SkillRegistry::discover(&agent_skills_dir) {
+                    skill_registry.merge(agent_skills);
+                }
+            }
+        }
+
+        // Discover assistant skills
+        let asst_skills_dir = skill::registry::assistant_skills_dir();
+        if asst_skills_dir.exists() {
+            tracing::info!("Discovering assistant skills from {:?}", asst_skills_dir);
+            if let Ok(asst_skills) = skill::registry::SkillRegistry::discover(&asst_skills_dir) {
+                skill_registry.merge(asst_skills);
+            }
+        }
+
+        let skill_registry = Arc::new(skill_registry);
 
         Ok(Self {
             registry,
@@ -89,8 +111,8 @@ impl Core {
     }
 
     /// Build the system prompt for an agent by injecting relevant skill instructions
-    pub fn build_agent_prompt(&self, role: &str, skill_names: &[String]) -> String {
-        self.skill_registry.build_system_prompt(role, skill_names)
+    pub fn build_agent_prompt(&self, role: &str) -> String {
+        self.skill_registry.build_system_prompt(role)
     }
 
     /// Start the background scheduler that drives assistant periodic tasks

@@ -34,12 +34,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                     _ => Color::Gray,
                 };
 
-                let skills_str = if agent.skills.is_empty() {
-                    "none".into()
-                } else {
-                    agent.skills.join(", ")
-                };
-
                 vec![
                     Line::from(vec![
                         format!(
@@ -49,9 +43,6 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                         .into(),
                         agent.status.clone().fg(status_color).into(),
                         format!("  {} [Edit] [Delete]", action).into(),
-                    ]),
-                    Line::from(vec![
-                        format!("   Skills: {}", skills_str).into(),
                     ]),
                     Line::from(vec!["".into()]),
                 ]

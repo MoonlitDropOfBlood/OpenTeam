@@ -93,7 +93,7 @@ async fn agent_main_loop(
     let mut is_paused = false;
 
     // Build base system prompt: role + skill instructions (constant across messages)
-    let base_prompt = skill_registry.build_system_prompt(&config.role, &config.skills);
+    let base_prompt = skill_registry.build_system_prompt(&config.role);
 
     loop {
         tokio::select! {
