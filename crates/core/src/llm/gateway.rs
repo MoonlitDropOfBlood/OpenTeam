@@ -93,6 +93,7 @@ impl LlmGateway {
         match model_config.provider.as_str() {
             "anthropic" => self.call_anthropic(model_config, request).await,
             "ollama" => self.call_ollama(model_config, request).await,
+            "deepseek" => self.call_openai(model_config, request).await,
             provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
         }
     }
@@ -238,6 +239,104 @@ impl LlmGateway {
             usage: TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
+            },
+        })
+    }
+
+    async fn call_openai(
+        &self,
+        config: &ModelConfig,
+        request: &ChatRequest,
+    ) -> Result<ChatResponse, CoreError> {
+        let api_key = std::env::var(
+            config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY"),
+        )
+        .map_err(|_| CoreError::Llm(format!(
+            "{} not set",
+            config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY"),
+        )))?;
+
+        // Build messages array with system prompt
+        let mut all_messages: Vec<serde_json::Value> = vec![
+            serde_json::json!({"role": "system", "content": request.system_prompt}),
+        ];
+        all_messages.extend(request.messages.iter().map(|m| {
+            serde_json::json!({"role": m.role, "content": m.content})
+        }));
+
+        let mut body = serde_json::json!({
+            "model": config.model,
+            "max_tokens": config.max_tokens,
+            "messages": all_messages,
+        });
+
+        // Add tools if present
+        if !request.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
+                serde_json::json!({
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.input_schema,
+                    }
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(tools);
+        }
+
+        // Determine API base URL based on provider
+        let api_base = match config.provider.as_str() {
+            "deepseek" => "https://api.deepseek.com/v1/chat/completions",
+            provider => {
+                return Err(CoreError::Llm(format!(
+                    "Unknown OpenAI-compatible provider: {provider}"
+                )))
+            }
+        };
+
+        let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
+        let response = tokio::time::timeout(
+            timeout,
+            self.client
+                .post(api_base)
+                .header("Authorization", format!("Bearer {}", api_key))
+                .json(&body)
+                .send(),
+        )
+        .await
+        .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
+
+        let json: serde_json::Value = response.json().await?;
+
+        // Parse OpenAI-compatible response
+        let choice = &json["choices"][0];
+        let message = &choice["message"];
+        let content = message["content"].as_str().unwrap_or("").to_string();
+
+        let mut tool_calls = Vec::new();
+        if let Some(tcs) = message["tool_calls"].as_array() {
+            for tc in tcs {
+                tool_calls.push(ToolCall {
+                    id: tc["id"].as_str().unwrap_or("").to_string(),
+                    name: tc["function"]["name"].as_str().unwrap_or("").to_string(),
+                    arguments: tc["function"]["arguments"]
+                        .as_str()
+                        .and_then(|s| serde_json::from_str(s).ok())
+                        .unwrap_or(serde_json::Value::Null),
+                });
+            }
+        }
+
+        let input_tokens = json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
+        let output_tokens = json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+
+        Ok(ChatResponse {
+            content,
+            tool_calls,
+            usage: TokenUsage {
+                input_tokens,
+                output_tokens,
             },
         })
     }

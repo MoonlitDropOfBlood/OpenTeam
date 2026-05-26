@@ -325,7 +325,26 @@ thread_msgs.push(ChatMessage {
                             role: "assistant".into(),
                             content: response.content.clone(),
                         });
-                        if history.len() > 40 { let excess = history.len() - 40; history.drain(0..excess); }
+                        // Smart compression: estimate token count and compress when approaching limit
+                        let max_context = config.llm.primary.max_tokens as f64 * 0.8; // 80% of max
+                        let estimated_tokens: usize = history.iter()
+                            .map(|m| m.content.len() / 2) // rough estimate: ~2 chars per token for English, ~1 for Chinese
+                            .sum();
+                        if estimated_tokens as f64 > max_context {
+                            // Keep the last 10 turns (most recent), compress the rest into a summary
+                            let keep = if history.len() > 20 { 10 } else { history.len() / 2 };
+                            let compress_count = history.len().saturating_sub(keep);
+                            if compress_count > 2 {
+                                let _to_compress: Vec<String> = history.drain(0..compress_count)
+                                    .map(|m| format!("{}: {}", m.role, &m.content[..m.content.len().min(100)])).collect();
+                                let summary = format!("[Earlier conversation: {} turns compressed]", compress_count / 2);
+                                tracing::info!("Agent {} compressed {} history turns (est. {} tokens)", config.name, compress_count, estimated_tokens);
+                                history.insert(0, ChatMessage {
+                                    role: "system".into(),
+                                    content: summary,
+                                });
+                            }
+                        }
 
                         tracing::info!(
                             "Agent {} final response ({} tokens): {}",
@@ -404,7 +423,26 @@ thread_msgs.push(ChatMessage {
                                         role: "assistant".into(),
                                         content: resp.content.clone(),
                                     });
-                                    if history.len() > 40 { let excess = history.len() - 40; history.drain(0..excess); }
+                                    // Smart compression: estimate token count and compress when approaching limit
+                        let max_context = config.llm.primary.max_tokens as f64 * 0.8; // 80% of max
+                        let estimated_tokens: usize = history.iter()
+                            .map(|m| m.content.len() / 2) // rough estimate: ~2 chars per token for English, ~1 for Chinese
+                            .sum();
+                        if estimated_tokens as f64 > max_context {
+                            // Keep the last 10 turns (most recent), compress the rest into a summary
+                            let keep = if history.len() > 20 { 10 } else { history.len() / 2 };
+                            let compress_count = history.len().saturating_sub(keep);
+                            if compress_count > 2 {
+                                let _to_compress: Vec<String> = history.drain(0..compress_count)
+                                    .map(|m| format!("{}: {}", m.role, &m.content[..m.content.len().min(100)])).collect();
+                                let summary = format!("[Earlier conversation: {} turns compressed]", compress_count / 2);
+                                tracing::info!("Agent {} compressed {} history turns (est. {} tokens)", config.name, compress_count, estimated_tokens);
+                                history.insert(0, ChatMessage {
+                                    role: "system".into(),
+                                    content: summary,
+                                });
+                            }
+                        }
 
                                     tracing::info!(
                                         "Agent {} fallback response: {}",
