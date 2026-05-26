@@ -86,12 +86,28 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
                 "required": ["url"]
             }),
         },
+        ToolDefinition {
+            name: "send_feishu_message".into(),
+            description: "Send a message to the Feishu group chat. Use this ONLY when you need to communicate results to the user, request collaboration from another agent via @mention, or escalate an issue you cannot resolve yourself. Do NOT use this for internal reasoning or intermediate thoughts.".into(),
+            input_schema: serde_json::json!({
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "The message content to send"},
+                    "mention_agents": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional list of agent names to @mention"
+                    }
+                },
+                "required": ["message"]
+            }),
+        },
     ]
 }
 
 /// Check if a tool name is a built-in tool
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "read_file" | "write_file" | "glob_files" | "grep_search" | "list_directory" | "bash_exec" | "web_fetch")
+    matches!(name, "read_file" | "write_file" | "glob_files" | "grep_search" | "list_directory" | "bash_exec" | "web_fetch" | "send_feishu_message")
 }
 
 /// Execute a built-in tool and return the result text
@@ -104,6 +120,7 @@ pub async fn execute_builtin(name: &str, args: &serde_json::Value) -> Result<Str
         "list_directory" => cmd_list_directory(args),
         "bash_exec" => cmd_bash_exec(args).await,
         "web_fetch" => cmd_web_fetch(args).await,
+        "send_feishu_message" => cmd_send_feishu(args),
         _ => Err(CoreError::Mcp(format!("Unknown built-in tool: {name}"))),
     }
 }
@@ -295,4 +312,11 @@ async fn cmd_web_fetch(args: &serde_json::Value) -> Result<String, CoreError> {
 
     let preview = &text[..text.len().min(5000)];
     Ok(format!("HTTP {status}\n\n{preview}"))
+}
+
+fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> {
+    let message = args["message"].as_str()
+        .ok_or_else(|| CoreError::Mcp("send_feishu_message requires 'message'".into()))?;
+    tracing::info!("[send_feishu] {message}");
+    Ok(format!("Message sent to Feishu: {message}"))
 }

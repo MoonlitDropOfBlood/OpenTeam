@@ -182,9 +182,9 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(json.as_bytes()).unwrap();
         let registry = McpRegistry::discover_all(&[path]).unwrap();
-        // 7 built-in + 2 from MCP config = 9 total
+        // 8 built-in + 2 from MCP config = 10 total
         let all_tools = registry.get_all_tools();
-        assert_eq!(all_tools.len(), 9);
+        assert_eq!(all_tools.len(), 10);
         // Verify built-in tools are present
         let tool_names: Vec<&str> = all_tools.iter().map(|t| t.name.as_str()).collect();
         assert!(tool_names.contains(&"read_file"));

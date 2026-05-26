@@ -119,20 +119,42 @@ impl SkillRegistry {
         prompt.push_str("\n\n");
 
         let all_skills: Vec<&SkillDef> = self.skills.values().collect();
-        if all_skills.is_empty() {
-            return prompt;
-        }
+        if !all_skills.is_empty() {
+            prompt.push_str("## 可用技能\n\n");
+            prompt.push_str("你有以下技能可用，根据需求选择合适的技能，严格按照技能说明执行。\n\n");
 
-        prompt.push_str("## 可用技能\n\n");
-        prompt.push_str("你有以下技能可用，根据需求选择合适的技能，严格按照技能说明执行。\n\n");
-
-        for skill in &all_skills {
-            prompt.push_str(&format!("### {}\n", skill.name));
-            if !skill.description.is_empty() {
-                prompt.push_str(&format!("{}\n\n", skill.description));
+            for skill in &all_skills {
+                prompt.push_str(&format!("### {}\n", skill.name));
+                if !skill.description.is_empty() {
+                    prompt.push_str(&format!("{}\n\n", skill.description));
+                }
+                prompt.push_str(&format!("{}\n\n", skill.instructions));
             }
-            prompt.push_str(&format!("{}\n\n", skill.instructions));
         }
+
+        // Communication rules for ALL agents
+        prompt.push_str(r#"
+## Communication Rules (Feishu)
+
+Send messages to the Feishu group chat ONLY when necessary. Do NOT broadcast every thought.
+
+**When to send a message (use send_feishu_message tool):**
+- You completed a user's request and have a final result
+- You need to request information or action from another agent via @mention
+- You encountered a blocker you cannot resolve alone
+- The user explicitly asked for a progress update
+
+**When NOT to send a message:**
+- Internal reasoning, analysis, or planning (LLM will remember these)
+- Minor intermediate progress (unless the user asked for real-time tracking)
+- While waiting for another agent's reply (wait for it, then respond once)
+
+**Style:**
+- Responses to users: concise, complete, lead with the conclusion
+- Messages to other agents: clear what you need from them
+- One message per update — do not split into multiple messages
+- If it fits in one sentence, do not write three paragraphs.
+"#);
 
         prompt
     }
