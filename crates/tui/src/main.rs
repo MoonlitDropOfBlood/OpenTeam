@@ -58,12 +58,118 @@ async fn main() -> anyhow::Result<()> {
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
 
-    // Initialize Core
-    let agents_dir = Path::new("agents");
-    let llm_config = Path::new("llm_config.yaml");
-    let core = Core::new(agents_dir, llm_config, "sqlite:tui.db").await?;
-
     let mut terminal = ratatui::init();
+
+    // Show loading screen while Core initializes
+    let core = {
+        let agents_dir = Path::new("agents");
+        let llm_config = Path::new("llm_config.yaml");
+        let frames = ["|", "/", "-", "\\"];
+        let steps = [
+            ("Loading configuration...", 0.1),
+            ("Initializing LLM Gateway...", 0.2),
+            ("Connecting memory store...", 0.3),
+            ("Discovering skills...", 0.5),
+            ("Probing MCP servers...", 0.6),
+            ("Starting plugin system...", 0.8),
+            ("Ready!", 1.0),
+        ];
+        let mut step_idx = 0;
+
+        // Spawn Core init in background
+        let core_fut = Core::new(agents_dir, llm_config, "sqlite:tui.db");
+        let mut core_poll = std::pin::pin!(core_fut);
+
+        loop {
+            tokio::select! {
+                result = &mut core_poll => {
+                    match result {
+                        Ok(core) => break core,
+                        Err(e) => {
+                            // Show error on loading screen
+                            terminal.draw(|f| {
+                                let area = f.area();
+                                let lines = vec![
+                                    ratatui::text::Line::from(ratatui::text::Span::styled(
+                                        "OpenTeam",
+                                        ratatui::style::Style::default()
+                                            .fg(ratatui::style::Color::Cyan)
+                                            .add_modifier(ratatui::style::Modifier::BOLD),
+                                    )),
+                                    ratatui::text::Line::from(""),
+                                    ratatui::text::Line::from(ratatui::text::Span::styled(
+                                        format!("Error: {e}"),
+                                        ratatui::style::Style::default().fg(ratatui::style::Color::Red),
+                                    )),
+                                    ratatui::text::Line::from(""),
+                                    ratatui::text::Line::from("Press any key to exit"),
+                                ];
+                                let block = ratatui::widgets::Block::bordered().title(" Startup Failed ");
+                                let p = ratatui::widgets::Paragraph::new(lines).block(block).alignment(ratatui::layout::Alignment::Center);
+                                let area = ratatui::layout::Layout::default()
+                                    .direction(ratatui::layout::Direction::Vertical)
+                                    .constraints([ratatui::layout::Constraint::Min(0)])
+                                    .margin(4)
+                                    .split(area)[0];
+                                f.render_widget(p, area);
+                            })?;
+                            // Wait for keypress
+                            loop {
+                                if let Event::Key(_) = event::read()? { break; }
+                            }
+                            ratatui::restore();
+                            return Err(e.into());
+                        }
+                    }
+                }
+                _ = tokio::time::sleep(std::time::Duration::from_millis(80)) => {
+                    let progress = if step_idx < steps.len() - 1 {
+                        steps[step_idx].1
+                    } else {
+                        1.0
+                    };
+                    let spinner = frames[step_idx % 4];
+                    let label = if step_idx < steps.len() - 1 {
+                        steps[step_idx].0
+                    } else {
+                        steps[steps.len() - 1].0
+                    };
+                    if step_idx < steps.len() - 1 {
+                        step_idx += 1;
+                    }
+
+                    terminal.draw(|f| {
+                        let area = f.area();
+                        let bar_width = (area.width as f64 * 0.4) as u16;
+                        let filled = (bar_width as f64 * progress) as u16;
+                        let bar: String = (0..filled).map(|_| '█').chain((filled..bar_width).map(|_| '░')).collect();
+
+                        let lines = vec![
+                            ratatui::text::Line::from(ratatui::text::Span::styled(
+                                "OpenTeam",
+                                ratatui::style::Style::default()
+                                    .fg(ratatui::style::Color::Cyan)
+                                    .add_modifier(ratatui::style::Modifier::BOLD),
+                            )),
+                            ratatui::text::Line::from("AI Agent Orchestrator"),
+                            ratatui::text::Line::from(""),
+                            ratatui::text::Line::from(ratatui::text::Span::raw(format!(" {spinner} {label}"))),
+                            ratatui::text::Line::from(ratatui::text::Span::raw(format!(" [{bar}]"))),
+                        ];
+                        let block = ratatui::widgets::Block::bordered().title(" Starting... ");
+                        let p = ratatui::widgets::Paragraph::new(lines).block(block).alignment(ratatui::layout::Alignment::Center);
+                        let area = ratatui::layout::Layout::default()
+                            .direction(ratatui::layout::Direction::Vertical)
+                            .constraints([ratatui::layout::Constraint::Min(0)])
+                            .margin(4)
+                            .split(area)[0];
+                        f.render_widget(p, area);
+                    })?;
+                }
+            }
+        }
+    };
+
     let mut app = App::new();
 
     // Populate app state from Core

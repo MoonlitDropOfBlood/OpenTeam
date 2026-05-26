@@ -1,138 +1,94 @@
-# Feishu Agent Orchestrator
+﻿# OpenTeam
 
-> **在飞书群里开一家"一人公司"。**
+> **鍦ㄩ涔︾兢閲屽紑涓€瀹?涓€浜哄叕鍙?銆?*
 >
-> 自定义 AI Agent（数字员工），在飞书群中像真实团队一样自动协作。
-> 用户（老板）在群里发需求，Agent 们自动拆解任务、互相 @ 协作。
-
-## 架构概览
+> 鑷畾涔?AI Agent锛堟暟瀛楀憳宸ワ級锛屽湪椋炰功缇や腑鍍忕湡瀹炲洟闃熶竴鏍疯嚜鍔ㄥ崗浣溿€?> 鐢ㄦ埛锛堣€佹澘锛夊湪缇ら噷鍙戦渶姹傦紝Agent 浠嚜鍔ㄦ媶瑙ｄ换鍔°€佷簰鐩?@ 鍗忎綔銆?
+## 鏋舵瀯姒傝
 
 ```
-┌─────────────────────────────────────────────────┐
-│                  你的电脑（本地）                   │
-│                                                    │
-│  ┌──────────┐  ┌──────────────────────────────┐  │
-│  │   TUI    │  │      Rust Core (独立库)        │  │
-│  │  (Ratatui)│  │  ┌──────┐ ┌──────┐ ┌──────┐ │  │
-│  └──────────┘  │  │Agent  │ │Memory│ │LLM   │ │  │
-│                │  │Manager│ │Store │ │Gateway│ │  │
-│                │  ├──────┤ ├──────┤ ├──────┤ │  │
-│                │  │Router│ │Feishu│ │Secret│ │  │
-│                │  │      │ │Bridge│ │-ary  │ │  │
-│                │  └──────┘ └──────┘ └──────┘ │  │
-│                └──────────┬───────────────────┘  │
-│                           │ IPC (JSON-RPC)        │
-│                ┌──────────▼───────────────────┐  │
-│                │   Node.js Plugin Host         │  │
-│                └──────────────────────────────┘  │
-│                           │                       │
-└───────────────────────────┼───────────────────────┘
-                            │ lark-cli
-┌───────────────────────────┼───────────────────────┐
-│                           │       飞书平台          │
-│                ┌──────────▼───────────────────┐   │
-│                │        飞书群聊（协作可见层）     │   │
-│                │ 助理: "PRD 写好了，请过目"      │   │
-│                │ 用户: "@Dev 直接按方案 A 做"   │   │
-│                └──────────────────────────────┘   │
-└──────────────────────────────────────────────────┘
-```
+鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                 浣犵殑鐢佃剳锛堟湰鍦帮級                   鈹?鈹?                                                   鈹?鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹?鈹? 鈹?  TUI    鈹? 鈹?     Rust Core (鐙珛搴?        鈹? 鈹?鈹? 鈹? (Ratatui)鈹? 鈹? 鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹?鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹?鈹? 鈹?鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹? 鈹侫gent  鈹?鈹侻emory鈹?鈹侺LM   鈹?鈹? 鈹?鈹?               鈹? 鈹侻anager鈹?鈹係tore 鈹?鈹侴ateway鈹?鈹? 鈹?鈹?               鈹? 鈹溾攢鈹€鈹€鈹€鈹€鈹€鈹?鈹溾攢鈹€鈹€鈹€鈹€鈹€鈹?鈹溾攢鈹€鈹€鈹€鈹€鈹€鈹?鈹? 鈹?鈹?               鈹? 鈹俁outer鈹?鈹侳eishu鈹?鈹係ecret鈹?鈹? 鈹?鈹?               鈹? 鈹?     鈹?鈹侭ridge鈹?鈹?ary  鈹?鈹? 鈹?鈹?               鈹? 鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹?鈹? 鈹?鈹?               鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹?鈹?                          鈹?IPC (JSON-RPC)        鈹?鈹?               鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈻尖攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹?鈹?               鈹?  Node.js Plugin Host         鈹? 鈹?鈹?               鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹? 鈹?鈹?                          鈹?                      鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹尖攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?                            鈹?lark-cli
+鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹尖攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?                          鈹?      椋炰功骞冲彴          鈹?鈹?               鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈻尖攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹?               鈹?       椋炰功缇よ亰锛堝崗浣滃彲瑙佸眰锛?    鈹?  鈹?鈹?               鈹?鍔╃悊: "PRD 鍐欏ソ浜嗭紝璇疯繃鐩?      鈹?  鈹?鈹?               鈹?鐢ㄦ埛: "@Dev 鐩存帴鎸夋柟妗?A 鍋?   鈹?  鈹?鈹?               鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?  鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?```
 
-## 功能特性
+## 鍔熻兘鐗规€?
+### Agent 绯荤粺
+- **鑷畾涔?Agent**锛氶€氳繃 YAML 瀹氫箟瑙掕壊銆佹€ф牸銆丩LM 閰嶇疆銆佽Е鍙戣瘝
+- **鍔╃悊 Agent**锛氫富 Agent锛屽繖鏃朵富鍔ㄦ帹杩涳紝闂叉椂闈欓粯褰掓。锛岀揣鎬ュ叧閿瘝绔嬪嵆鍞ら啋
+- **鍙岄€氶亾閫氫俊**锛氱敤鎴峰彲 @鍔╃悊锛堟棩甯稿崗璋冿級鎴栫洿鎺?@浠绘剰 Agent锛堟渶楂樹紭鍏堢骇锛?- **蹇欓棽鎰熺煡**锛氬懆涓€鑷冲懆浜?9:00-18:00 蹇欐椂妯″紡锛屽叾浣欐椂闂撮棽鏃舵ā寮忥紝绱ф€ュ叧閿瘝瑕嗙洊涓€鍒?
+### 璁板繂绯荤粺
+- **涓夊眰璁板繂**锛歐orking Memory锛圠LM 涓婁笅鏂囷級鈫?Short-term锛堢粨鏋勫寲鎽樿锛夆啋 Long-term锛堟寔涔呯煡璇嗭級
+- **璇箟妫€绱?*锛氫綑寮︾浉浼煎害鍚戦噺鎼滅储
+- **鑷劧閬楀繕**锛氳壘瀹炬旦鏂“鍑忔ā鍨嬶紝閲嶈鎬?8-10 杩戞案涔呬繚鐣?- **鑷姩鍘嬬缉**锛氱煭瀵硅瘽瑙勫垯鎻愬彇锛岄暱瀵硅瘽 LLM 鍘嬬缉
+- **SQLite 瀛樺偍**锛氭湰鍦版寔涔呭寲锛岄浂澶栭儴渚濊禆
 
-### Agent 系统
-- **自定义 Agent**：通过 YAML 定义角色、性格、LLM 配置、触发词
-- **助理 Agent**：主 Agent，忙时主动推进，闲时静默归档，紧急关键词立即唤醒
-- **双通道通信**：用户可 @助理（日常协调）或直接 @任意 Agent（最高优先级）
-- **忙闲感知**：周一至周五 9:00-18:00 忙时模式，其余时间闲时模式，紧急关键词覆盖一切
+### LLM 闆嗘垚
+- **澶?Provider**锛欰nthropic Claude + Ollama 鏈湴妯″瀷
+- **Agent 绾ч厤缃?*锛氭瘡涓?Agent 鐙珛閰嶇疆 primary + fallback 妯″瀷
+- **闄愭祦淇濇姢**锛氭粦鍔ㄧ獥鍙?RPM 闄愭祦鍣?- **瓒呮椂鎺у埗**锛氬彲閰嶇疆 API 瓒呮椂
 
-### 记忆系统
-- **三层记忆**：Working Memory（LLM 上下文）→ Short-term（结构化摘要）→ Long-term（持久知识）
-- **语义检索**：余弦相似度向量搜索
-- **自然遗忘**：艾宾浩斯衰减模型，重要性 8-10 近永久保留
-- **自动压缩**：短对话规则提取，长对话 LLM 压缩
-- **SQLite 存储**：本地持久化，零外部依赖
-
-### LLM 集成
-- **多 Provider**：Anthropic Claude + Ollama 本地模型
-- **Agent 级配置**：每个 Agent 独立配置 primary + fallback 模型
-- **限流保护**：滑动窗口 RPM 限流器
-- **超时控制**：可配置 API 超时
-
-### 飞书集成
-- **消息收发**：发送/回复/话题线程回复
-- **@mention**：`<at user_id="xxx">名称</at>` 格式
-- **WebSocket 事件订阅**：实时接收飞书消息事件
-- **发送队列**：5 QPS 限流，优先级排序
-- **自动重试**：失败自动降级
-
-### 插件系统
-- **Node.js 宿主**：JSON-RPC over stdio 通信
-- **Hook 点**：system:startup/shutdown、message:received、agent:after_create 等
-- **Plugin SDK**：`createPlugin()` 快速开发插件
-
-### TUI 终端界面
-| 快捷键 | 页面 | 内容 |
+### 椋炰功闆嗘垚
+- **娑堟伅鏀跺彂**锛氬彂閫?鍥炲/璇濋绾跨▼鍥炲
+- **@mention**锛歚<at user_id="xxx">鍚嶇О</at>` 鏍煎紡
+- **WebSocket 浜嬩欢璁㈤槄**锛氬疄鏃舵帴鏀堕涔︽秷鎭簨浠?- **鍙戦€侀槦鍒?*锛? QPS 闄愭祦锛屼紭鍏堢骇鎺掑簭
+- **鑷姩閲嶈瘯**锛氬け璐ヨ嚜鍔ㄩ檷绾?
+### 鎻掍欢绯荤粺
+- **Node.js 瀹夸富**锛欽SON-RPC over stdio 閫氫俊
+- **Hook 鐐?*锛歴ystem:startup/shutdown銆乵essage:received銆乤gent:after_create 绛?- **Plugin SDK**锛歚createPlugin()` 蹇€熷紑鍙戞彃浠?
+### TUI 缁堢鐣岄潰
+| 蹇嵎閿?| 椤甸潰 | 鍐呭 |
 |--------|------|------|
-| F1 | Home | Agent 卡片 + 消息流 |
-| F2 | Agents | Agent 管理列表 |
-| F3 | Tasks | 任务看板 |
-| F4 | Logs | 日志查看器 |
-| F5 | Feishu | 飞书连接状态 |
-| F6 | Memory | 记忆浏览器 |
-| `r` | — | 手动刷新数据 |
-| `a` | — | 切换自动刷新 (5s) |
-| `q` / `Esc` | — | 退出 |
+| F1 | Home | Agent 鍗＄墖 + 娑堟伅娴?|
+| F2 | Agents | Agent 绠＄悊鍒楄〃 |
+| F3 | Tasks | 浠诲姟鐪嬫澘 |
+| F4 | Logs | 鏃ュ織鏌ョ湅鍣?|
+| F5 | Feishu | 椋炰功杩炴帴鐘舵€?|
+| F6 | Memory | 璁板繂娴忚鍣?|
+| `r` | 鈥?| 鎵嬪姩鍒锋柊鏁版嵁 |
+| `a` | 鈥?| 鍒囨崲鑷姩鍒锋柊 (5s) |
+| `q` / `Esc` | 鈥?| 閫€鍑?|
 
-## 快速开始
+## 蹇€熷紑濮?
+### 鍓嶇疆鏉′欢
 
-### 前置条件
-
-| 依赖 | 版本 | 用途 | 安装 |
+| 渚濊禆 | 鐗堟湰 | 鐢ㄩ€?| 瀹夎 |
 |------|------|------|------|
-| Rust | ≥ 1.75 | 核心引擎 | [rustup](https://rustup.rs/) |
-| Node.js | ≥ 18 | 插件宿主 | [nodejs.org](https://nodejs.org/) |
-| lark-cli | 最新 | 飞书集成 | [飞书 CLI 指南](https://open.feishu.cn/document/uYjL24iN/uMDMxEjLzAjMx4yM0ITM) |
-| Ollama (可选) | ≥ 0.1 | 本地 LLM | [ollama.com](https://ollama.com/) |
+| Rust | 鈮?1.75 | 鏍稿績寮曟搸 | [rustup](https://rustup.rs/) |
+| Node.js | 鈮?18 | 鎻掍欢瀹夸富 | [nodejs.org](https://nodejs.org/) |
+| lark-cli | 鏈€鏂?| 椋炰功闆嗘垚 | [椋炰功 CLI 鎸囧崡](https://open.feishu.cn/document/uYjL24iN/uMDMxEjLzAjMx4yM0ITM) |
+| Ollama (鍙€? | 鈮?0.1 | 鏈湴 LLM | [ollama.com](https://ollama.com/) |
 
-### 第一步：克隆 & 构建
+### 绗竴姝ワ細鍏嬮殕 & 鏋勫缓
 
 ```bash
 git clone <repo-url>
 cd feishu-agent-orchestrator
 
-# 构建全部（首次需要下载依赖，约 2-3 分钟）
-cargo build
+# 鏋勫缓鍏ㄩ儴锛堥娆￠渶瑕佷笅杞戒緷璧栵紝绾?2-3 鍒嗛挓锛?cargo build
 
-# 确认构建成功
+# 纭鏋勫缓鎴愬姛
 cargo test
 ```
 
-### 第二步：配置 Agent
+### 绗簩姝ワ細閰嶇疆 Agent
 
-项目自带一个示例 Agent `agents/pm.yaml`（产品经理"小红"）。你可以：
-
-**a) 直接使用默认配置试跑：**
+椤圭洰鑷甫涓€涓ず渚?Agent `agents/pm.yaml`锛堜骇鍝佺粡鐞?灏忕孩"锛夈€備綘鍙互锛?
+**a) 鐩存帴浣跨敤榛樿閰嶇疆璇曡窇锛?*
 ```bash
 cargo run -p feishu-agent-tui
 ```
 
-此时 TUI 会加载 `agents/pm.yaml`，在 Home 页面看到 Agent 卡片。
+姝ゆ椂 TUI 浼氬姞杞?`agents/pm.yaml`锛屽湪 Home 椤甸潰鐪嬪埌 Agent 鍗＄墖銆?
+**b) 鍒涘缓鑷繁鐨?Agent锛?*
 
-**b) 创建自己的 Agent：**
-
-在 `agents/` 目录下新建 YAML 文件，系统会自动加载该目录下所有 `.yaml` 文件。
-
+鍦?`agents/` 鐩綍涓嬫柊寤?YAML 鏂囦欢锛岀郴缁熶細鑷姩鍔犺浇璇ョ洰褰曚笅鎵€鏈?`.yaml` 鏂囦欢銆?
 ```bash
-# 举例：创建一个开发 Agent
+# 涓句緥锛氬垱寤轰竴涓紑鍙?Agent
 touch agents/codecat.yaml
 ```
 
-`agents/codecat.yaml`：
-```yaml
+`agents/codecat.yaml`锛?```yaml
 name: "CodeCat"
-role: "你是一个资深后端工程师，擅长 Rust 和系统架构设计"
-personality: "严谨、有条理、注重代码质量"
+role: "浣犳槸涓€涓祫娣卞悗绔伐绋嬪笀锛屾搮闀?Rust 鍜岀郴缁熸灦鏋勮璁?
+personality: "涓ヨ皑銆佹湁鏉＄悊銆佹敞閲嶄唬鐮佽川閲?
 llm:
   primary:
     provider: anthropic
@@ -147,7 +103,7 @@ llm:
     max_tokens: 4096
     timeout_secs: 60
 triggers:
-  - pattern: "开发|实现|代码|架构"
+  - pattern: "寮€鍙憒瀹炵幇|浠ｇ爜|鏋舵瀯"
     auto_respond: true
   - pattern: "@Dev|@CodeCat"
     auto_respond: true
@@ -155,9 +111,9 @@ skills: []
 mcps: []
 ```
 
-### 第三步：设置 API 密钥
+### 绗笁姝ワ細璁剧疆 API 瀵嗛挜
 
-每个 Agent 可以独立配置 LLM。将 API Key 设为环境变量（名称对应 YAML 中的 `api_key_env`）：
+姣忎釜 Agent 鍙互鐙珛閰嶇疆 LLM銆傚皢 API Key 璁句负鐜鍙橀噺锛堝悕绉板搴?YAML 涓殑 `api_key_env`锛夛細
 
 ```bash
 # Windows PowerShell
@@ -167,143 +123,106 @@ $env:ANTHROPIC_API_KEY = "sk-ant-xxx"
 export ANTHROPIC_API_KEY=sk-ant-xxx
 ```
 
-如果使用 Ollama 本地模型，无需 API Key，确保 Ollama 服务运行在 `localhost:11434`：
-
+濡傛灉浣跨敤 Ollama 鏈湴妯″瀷锛屾棤闇€ API Key锛岀‘淇?Ollama 鏈嶅姟杩愯鍦?`localhost:11434`锛?
 ```bash
 ollama pull qwen2.5:3b
 ollama serve
 ```
 
-### 第四步：配置飞书（可选）
+### 绗洓姝ワ細閰嶇疆椋炰功锛堝彲閫夛級
 
-如果需要飞书群聊集成：
+濡傛灉闇€瑕侀涔︾兢鑱婇泦鎴愶細
 
 ```bash
-# 1. 登录飞书 CLI
+# 1. 鐧诲綍椋炰功 CLI
 lark-cli login
 
-# 2. 验证登录状态
-lark-cli auth check
+# 2. 楠岃瘉鐧诲綍鐘舵€?lark-cli auth check
 
-# 3. 配置 WebSocket 事件（在飞书开发者后台开启 im.message.receive_v1）
-#    详情参见飞书开放平台文档
-```
+# 3. 閰嶇疆 WebSocket 浜嬩欢锛堝湪椋炰功寮€鍙戣€呭悗鍙板紑鍚?im.message.receive_v1锛?#    璇︽儏鍙傝椋炰功寮€鏀惧钩鍙版枃妗?```
 
-飞书集成会自动检测连接状态，在 TUI F5 页面可查看。
-
-### 第五步：运行
+椋炰功闆嗘垚浼氳嚜鍔ㄦ娴嬭繛鎺ョ姸鎬侊紝鍦?TUI F5 椤甸潰鍙煡鐪嬨€?
+### 绗簲姝ワ細杩愯
 
 ```bash
-# 方式一：TUI 终端界面（推荐）
+# 鏂瑰紡涓€锛歍UI 缁堢鐣岄潰锛堟帹鑽愶級
 cargo run -p feishu-agent-tui
 
-# 方式二：仅运行测试
-cargo test
+# 鏂瑰紡浜岋細浠呰繍琛屾祴璇?cargo test
 
-# 方式三：启动插件宿主（开发插件时使用）
-cd plugins/host && node src/index.js
+# 鏂瑰紡涓夛細鍚姩鎻掍欢瀹夸富锛堝紑鍙戞彃浠舵椂浣跨敤锛?cd plugins/host && node src/index.js
 ```
 
-### TUI 使用指南
+### TUI 浣跨敤鎸囧崡
 
-启动 TUI 后：
+鍚姩 TUI 鍚庯細
 
 ```
-┌─────────────────────────────────────────────────────┐
-│ My Virtual Company    Agents: 1 loaded     Noti: 0  │
-├─────────────────────────────────────────────────────┤
-│ ┌─ Agents ───────────┐ ┌─ Messages ───────────────┐ │
-│ │ 小红 (PM)  🟢 Idle │ │ System ready.             │ │
-│ └────────────────────┘ └──────────────────────────┘ │
-├─────────────────────────────────────────────────────┤
-│ F1:Home  F2:Agents  F3:Tasks  F4:Logs  F5:Feishu  │
-│ F6:Memory    r:refresh    a:auto    q:quit          │
-└─────────────────────────────────────────────────────┘
-```
+鈹屸攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?My Virtual Company    Agents: 1 loaded     Noti: 0  鈹?鈹溾攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?鈹屸攢 Agents 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹屸攢 Messages 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?鈹?鈹?灏忕孩 (PM)  馃煝 Idle 鈹?鈹?System ready.             鈹?鈹?鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?鈹溾攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?鈹?F1:Home  F2:Agents  F3:Tasks  F4:Logs  F5:Feishu  鈹?鈹?F6:Memory    r:refresh    a:auto    q:quit          鈹?鈹斺攢鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹?```
 
-**操作说明：**
-- **F1-F6**：切换页面（Home / Agents / Tasks / Logs / Feishu / Memory）
-- **r**：手动刷新数据
-- **a**：切换自动刷新（默认开启，每 5 秒刷新）
-- **q / Esc**：退出
-
-**各页面内容：**
-| 页面 | 看到什么 |
+**鎿嶄綔璇存槑锛?*
+- **F1-F6**锛氬垏鎹㈤〉闈紙Home / Agents / Tasks / Logs / Feishu / Memory锛?- **r**锛氭墜鍔ㄥ埛鏂版暟鎹?- **a**锛氬垏鎹㈣嚜鍔ㄥ埛鏂帮紙榛樿寮€鍚紝姣?5 绉掑埛鏂帮級
+- **q / Esc**锛氶€€鍑?
+**鍚勯〉闈㈠唴瀹癸細**
+| 椤甸潰 | 鐪嬪埌浠€涔?|
 |------|----------|
-| **Home (F1)** | 所有 Agent 概览卡片 + 系统消息流 |
-| **Agents (F2)** | Agent 详细列表，含角色、状态、技能 |
-| **Tasks (F3)** | 任务看板 |
-| **Logs (F4)** | LLM 调用日志、CLI 执行记录 |
-| **Feishu (F5)** | 飞书连接状态、WebSocket 事件、发送队列 |
-| **Memory (F6)** | 各 Agent 的记忆列表（类型、重要性、摘要） |
+| **Home (F1)** | 鎵€鏈?Agent 姒傝鍗＄墖 + 绯荤粺娑堟伅娴?|
+| **Agents (F2)** | Agent 璇︾粏鍒楄〃锛屽惈瑙掕壊銆佺姸鎬併€佹妧鑳?|
+| **Tasks (F3)** | 浠诲姟鐪嬫澘 |
+| **Logs (F4)** | LLM 璋冪敤鏃ュ織銆丆LI 鎵ц璁板綍 |
+| **Feishu (F5)** | 椋炰功杩炴帴鐘舵€併€乄ebSocket 浜嬩欢銆佸彂閫侀槦鍒?|
+| **Memory (F6)** | 鍚?Agent 鐨勮蹇嗗垪琛紙绫诲瀷銆侀噸瑕佹€с€佹憳瑕侊級 |
 
-### 示例工作流
-
-假设你配置了 PM Agent（小红）和 Dev Agent（CodeCat）：
-
-```
-1. TUI 启动 → F1 看到两个 Agent 卡片（小红 🟢 Idle, CodeCat 🟢 Idle）
-2. 创建一个任务 → F3 添加任务
-3. 各 Agent 自动处理 → F4 查看 LLM 调用日志
-4. 查看记忆 → F6 可以看到 Agent 自动压缩存储的对话摘要
-5. 飞书集成后 → F5 查看飞书消息事件流
-```
-
-### 下一步
-
-- [创建更多 Agent](/agents/) — 每个 `.yaml` 文件 = 一个数字员工
-- [编写插件](/plugins/examples/) — 用 Node.js 扩展系统功能
-- [接入飞书群](#第四步配置飞书可选) — 让 Agent 在飞书里协作
-
-## 项目结构
+### 绀轰緥宸ヤ綔娴?
+鍋囪浣犻厤缃簡 PM Agent锛堝皬绾級鍜?Dev Agent锛圕odeCat锛夛細
 
 ```
-├── Cargo.toml                     # Workspace 定义
-├── llm_config.yaml                # 全局 LLM 模型池
-├── agents/                        # Agent YAML 配置
-│   └── pm.yaml                    # 示例：产品经理 Agent
-├── crates/
-│   ├── core/                      # Rust Core 库
-│   │   └── src/
-│   │       ├── config/            # Agent/LLM 配置解析
-│   │       ├── registry/          # Agent 注册中心
-│   │       ├── llm/               # LLM Gateway + 限流
-│   │       ├── feishu/            # 飞书 CLI Bridge
-│   │       ├── memory/            # 记忆系统（三层）
-│   │       ├── agent/             # Agent 生命周期管理
-│   │       ├── router/            # 消息路由
-│   │       ├── assistant/         # 助理 Agent
-│   │       ├── plugin/            # 插件管理器
-│   │       ├── error.rs           # 统一错误类型
-│   │       └── lib.rs             # Core 入口
-│   └── tui/                       # TUI 终端界面
-│       └── src/
-│           ├── main.rs            # 事件循环
-│           ├── app.rs             # 应用状态
-│           ├── ui.rs              # 渲染分发
-│           └── pages/             # 各页面组件
-├── plugins/                       # 插件系统
-│   ├── host/                      # Node.js 宿主
-│   │   └── src/
-│   │       ├── index.js           # JSON-RPC 主循环
-│   │       ├── registry.js        # Hook 注册表
-│   │       └── transport.js       # stdio 传输层
-│   ├── sdk/                       # 插件 SDK
-│   └── examples/                  # 示例插件
-└── docs/superpowers/              # 设计文档
+1. TUI 鍚姩 鈫?F1 鐪嬪埌涓や釜 Agent 鍗＄墖锛堝皬绾?馃煝 Idle, CodeCat 馃煝 Idle锛?2. 鍒涘缓涓€涓换鍔?鈫?F3 娣诲姞浠诲姟
+3. 鍚?Agent 鑷姩澶勭悊 鈫?F4 鏌ョ湅 LLM 璋冪敤鏃ュ織
+4. 鏌ョ湅璁板繂 鈫?F6 鍙互鐪嬪埌 Agent 鑷姩鍘嬬缉瀛樺偍鐨勫璇濇憳瑕?5. 椋炰功闆嗘垚鍚?鈫?F5 鏌ョ湅椋炰功娑堟伅浜嬩欢娴?```
+
+### 涓嬩竴姝?
+- [鍒涘缓鏇村 Agent](/agents/) 鈥?姣忎釜 `.yaml` 鏂囦欢 = 涓€涓暟瀛楀憳宸?- [缂栧啓鎻掍欢](/plugins/examples/) 鈥?鐢?Node.js 鎵╁睍绯荤粺鍔熻兘
+- [鎺ュ叆椋炰功缇(#绗洓姝ラ厤缃涔﹀彲閫? 鈥?璁?Agent 鍦ㄩ涔﹂噷鍗忎綔
+
+## 椤圭洰缁撴瀯
+
+```
+鈹溾攢鈹€ Cargo.toml                     # Workspace 瀹氫箟
+鈹溾攢鈹€ llm_config.yaml                # 鍏ㄥ眬 LLM 妯″瀷姹?鈹溾攢鈹€ agents/                        # Agent YAML 閰嶇疆
+鈹?  鈹斺攢鈹€ pm.yaml                    # 绀轰緥锛氫骇鍝佺粡鐞?Agent
+鈹溾攢鈹€ crates/
+鈹?  鈹溾攢鈹€ core/                      # Rust Core 搴?鈹?  鈹?  鈹斺攢鈹€ src/
+鈹?  鈹?      鈹溾攢鈹€ config/            # Agent/LLM 閰嶇疆瑙ｆ瀽
+鈹?  鈹?      鈹溾攢鈹€ registry/          # Agent 娉ㄥ唽涓績
+鈹?  鈹?      鈹溾攢鈹€ llm/               # LLM Gateway + 闄愭祦
+鈹?  鈹?      鈹溾攢鈹€ feishu/            # 椋炰功 CLI Bridge
+鈹?  鈹?      鈹溾攢鈹€ memory/            # 璁板繂绯荤粺锛堜笁灞傦級
+鈹?  鈹?      鈹溾攢鈹€ agent/             # Agent 鐢熷懡鍛ㄦ湡绠＄悊
+鈹?  鈹?      鈹溾攢鈹€ router/            # 娑堟伅璺敱
+鈹?  鈹?      鈹溾攢鈹€ assistant/         # 鍔╃悊 Agent
+鈹?  鈹?      鈹溾攢鈹€ plugin/            # 鎻掍欢绠＄悊鍣?鈹?  鈹?      鈹溾攢鈹€ error.rs           # 缁熶竴閿欒绫诲瀷
+鈹?  鈹?      鈹斺攢鈹€ lib.rs             # Core 鍏ュ彛
+鈹?  鈹斺攢鈹€ tui/                       # TUI 缁堢鐣岄潰
+鈹?      鈹斺攢鈹€ src/
+鈹?          鈹溾攢鈹€ main.rs            # 浜嬩欢寰幆
+鈹?          鈹溾攢鈹€ app.rs             # 搴旂敤鐘舵€?鈹?          鈹溾攢鈹€ ui.rs              # 娓叉煋鍒嗗彂
+鈹?          鈹斺攢鈹€ pages/             # 鍚勯〉闈㈢粍浠?鈹溾攢鈹€ plugins/                       # 鎻掍欢绯荤粺
+鈹?  鈹溾攢鈹€ host/                      # Node.js 瀹夸富
+鈹?  鈹?  鈹斺攢鈹€ src/
+鈹?  鈹?      鈹溾攢鈹€ index.js           # JSON-RPC 涓诲惊鐜?鈹?  鈹?      鈹溾攢鈹€ registry.js        # Hook 娉ㄥ唽琛?鈹?  鈹?      鈹斺攢鈹€ transport.js       # stdio 浼犺緭灞?鈹?  鈹溾攢鈹€ sdk/                       # 鎻掍欢 SDK
+鈹?  鈹斺攢鈹€ examples/                  # 绀轰緥鎻掍欢
+鈹斺攢鈹€ docs/superpowers/              # 璁捐鏂囨。
 ```
 
-## 配置参考
-
-系统有四种配置：Agent 定义、LLM 模型池、MCP 工具、Skill 技能。全部支持文件热重载。
-
+## 閰嶇疆鍙傝€?
+绯荤粺鏈夊洓绉嶉厤缃細Agent 瀹氫箟銆丩LM 妯″瀷姹犮€丮CP 宸ュ叿銆丼kill 鎶€鑳姐€傚叏閮ㄦ敮鎸佹枃浠剁儹閲嶈浇銆?
 ---
 
-### Agent YAML 配置
+### Agent YAML 閰嶇疆
 
-Agent 通过 YAML 文件定义，放在 `agents/` 目录下自动加载。
-
-**最小配置：**
+Agent 閫氳繃 YAML 鏂囦欢瀹氫箟锛屾斁鍦?`agents/` 鐩綍涓嬭嚜鍔ㄥ姞杞姐€?
+**鏈€灏忛厤缃細**
 ```yaml
 name: "CodeCat"
 role: "You are a senior backend engineer."
@@ -315,7 +234,7 @@ llm:
     max_tokens: 8192
 ```
 
-**完整配置：**
+**瀹屾暣閰嶇疆锛?*
 ```yaml
 name: "CodeCat"
 role: "You are a senior backend engineer, skilled in Rust and system architecture."
@@ -335,56 +254,50 @@ llm:
     max_tokens: 4096
     timeout_secs: 60
 triggers:
-  - pattern: "开发|实现|代码|架构"
+  - pattern: "寮€鍙憒瀹炵幇|浠ｇ爜|鏋舵瀯"
     auto_respond: true
   - pattern: "@Dev|@CodeCat"
     auto_respond: true
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
+| 瀛楁 | 绫诲瀷 | 蹇呭～ | 璇存槑 |
 |------|------|------|------|
-| `name` | String | ✅ | Agent 名称（用于 @mention） |
-| `role` | String | ✅ | System Prompt，定义角色行为 |
-| `personality` | String | — | 性格描述 |
-| `llm.primary` | Object | ✅ | 主 LLM 配置（见下方 ModelConfig） |
-| `llm.fallback` | Object | — | 降级 LLM 配置（primary 失败时自动切换） |
-| `triggers[].pattern` | String | — | 触发关键词（正则表达式） |
-| `triggers[].auto_respond` | Bool | — | 是否自动响应（默认 `true`） |
+| `name` | String | 鉁?| Agent 鍚嶇О锛堢敤浜?@mention锛?|
+| `role` | String | 鉁?| System Prompt锛屽畾涔夎鑹茶涓?|
+| `personality` | String | 鈥?| 鎬ф牸鎻忚堪 |
+| `llm.primary` | Object | 鉁?| 涓?LLM 閰嶇疆锛堣涓嬫柟 ModelConfig锛?|
+| `llm.fallback` | Object | 鈥?| 闄嶇骇 LLM 閰嶇疆锛坧rimary 澶辫触鏃惰嚜鍔ㄥ垏鎹級 |
+| `triggers[].pattern` | String | 鈥?| 瑙﹀彂鍏抽敭璇嶏紙姝ｅ垯琛ㄨ揪寮忥級 |
+| `triggers[].auto_respond` | Bool | 鈥?| 鏄惁鑷姩鍝嶅簲锛堥粯璁?`true`锛?|
 
-Agent 的 `skills` 和 `mcps` 字段已移除 —— 现在通过文件系统自动发现（见下方）。
-
+Agent 鐨?`skills` 鍜?`mcps` 瀛楁宸茬Щ闄?鈥斺€?鐜板湪閫氳繃鏂囦欢绯荤粺鑷姩鍙戠幇锛堣涓嬫柟锛夈€?
 ---
 
-### LLM 配置
+### LLM 閰嶇疆
 
-#### ModelConfig（Agent YAML 内嵌）
-
-每个 Agent 在 `llm.primary` 中定义自己的模型：
-
+#### ModelConfig锛圓gent YAML 鍐呭祵锛?
+姣忎釜 Agent 鍦?`llm.primary` 涓畾涔夎嚜宸辩殑妯″瀷锛?
 ```yaml
 llm:
   primary:
-    provider: anthropic                    # 必填: anthropic | ollama | deepseek
-    model: claude-sonnet-4-20250514        # 必填: 模型 ID
-    api_key_env: ANTHROPIC_API_KEY         # 可选: API Key 环境变量名
-    max_tokens: 8192                       # 必填: 最大输出 token
-    timeout_secs: 120                      # 可选: API 超时（秒）
-    rate_limit: { rpm: 50, tpm: 100000 }   # 可选: 速率限制
+    provider: anthropic                    # 蹇呭～: anthropic | ollama | deepseek
+    model: claude-sonnet-4-20250514        # 蹇呭～: 妯″瀷 ID
+    api_key_env: ANTHROPIC_API_KEY         # 鍙€? API Key 鐜鍙橀噺鍚?    max_tokens: 8192                       # 蹇呭～: 鏈€澶ц緭鍑?token
+    timeout_secs: 120                      # 鍙€? API 瓒呮椂锛堢锛?    rate_limit: { rpm: 50, tpm: 100000 }   # 鍙€? 閫熺巼闄愬埗
 ```
 
-| 字段 | 类型 | 说明 |
+| 瀛楁 | 绫诲瀷 | 璇存槑 |
 |------|------|------|
-| `provider` | String | 模型提供商。`anthropic` / `ollama` / `deepseek` |
-| `model` | String | 模型 ID。如 `claude-sonnet-4-20250514`、`deepseek-v4-pro`、`qwen2.5:3b` |
-| `api_key_env` | String | API Key 对应的环境变量名。不设置则使用默认名（`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`） |
-| `max_tokens` | u32 | 最大输出 token 数 |
-| `timeout_secs` | u64 | API 调用超时（默认 120s） |
-| `rate_limit` | Object | `{ rpm: number, tpm: number }` 速率限制 |
+| `provider` | String | 妯″瀷鎻愪緵鍟嗐€俙anthropic` / `ollama` / `deepseek` |
+| `model` | String | 妯″瀷 ID銆傚 `claude-sonnet-4-20250514`銆乣deepseek-v4-pro`銆乣qwen2.5:3b` |
+| `api_key_env` | String | API Key 瀵瑰簲鐨勭幆澧冨彉閲忓悕銆備笉璁剧疆鍒欎娇鐢ㄩ粯璁ゅ悕锛坄ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`锛?|
+| `max_tokens` | u32 | 鏈€澶ц緭鍑?token 鏁?|
+| `timeout_secs` | u64 | API 璋冪敤瓒呮椂锛堥粯璁?120s锛?|
+| `rate_limit` | Object | `{ rpm: number, tpm: number }` 閫熺巼闄愬埗 |
 
-#### 全局模型池（可选）
+#### 鍏ㄥ眬妯″瀷姹狅紙鍙€夛級
 
-`llm_config.yaml` 定义共享模型池，Agent 可以通过此池引用模型（Agent 内嵌配置优先级更高）：
-
+`llm_config.yaml` 瀹氫箟鍏变韩妯″瀷姹狅紝Agent 鍙互閫氳繃姝ゆ睜寮曠敤妯″瀷锛圓gent 鍐呭祵閰嶇疆浼樺厛绾ф洿楂橈級锛?
 ```yaml
 models:
   claude-sonnet-4:
@@ -418,22 +331,20 @@ models:
     timeout_secs: 60
 ```
 
-**支持的 Provider：**
+**鏀寔鐨?Provider锛?*
 
-| Provider | API 端点 | 认证 |
+| Provider | API 绔偣 | 璁よ瘉 |
 |----------|---------|------|
 | `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` |
 | `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` |
-| `ollama` | `http://localhost:11434/api/chat` | 无需认证 |
+| `ollama` | `http://localhost:11434/api/chat` | 鏃犻渶璁よ瘉 |
 
 ---
 
-### MCP 配置（工具调用）
+### MCP 閰嶇疆锛堝伐鍏疯皟鐢級
 
-MCP（Model Context Protocol）服务器配置放在 `~/.config/OpenTeam/mcp.json`。
-支持本地子进程和远程 HTTP 两种传输方式。
-
-**标准格式：**
+MCP锛圡odel Context Protocol锛夋湇鍔″櫒閰嶇疆鏀惧湪 `~/.config/OpenTeam/mcp.json`銆?鏀寔鏈湴瀛愯繘绋嬪拰杩滅▼ HTTP 涓ょ浼犺緭鏂瑰紡銆?
+**鏍囧噯鏍煎紡锛?*
 
 ```json
 {
@@ -457,30 +368,28 @@ MCP（Model Context Protocol）服务器配置放在 `~/.config/OpenTeam/mcp.jso
 }
 ```
 
-| 字段 | 类型 | 必填 | 说明 |
+| 瀛楁 | 绫诲瀷 | 蹇呭～ | 璇存槑 |
 |------|------|------|------|
-| `command` | String | 互斥 | 本地服务器可执行文件路径（stdio 传输） |
-| `url` | String | 互斥 | 远程服务器 URL（HTTP 传输） |
-| `args` | String[] | — | 命令行参数 |
-| `env` | Object | — | 环境变量（支持 `${VAR_NAME}` 插值） |
-| `headers` | Object | — | HTTP 请求头（仅远程模式） |
-| `enabled` | Bool | — | 是否启用（默认 `true`，设为 `false` 跳过） |
+| `command` | String | 浜掓枼 | 鏈湴鏈嶅姟鍣ㄥ彲鎵ц鏂囦欢璺緞锛坰tdio 浼犺緭锛?|
+| `url` | String | 浜掓枼 | 杩滅▼鏈嶅姟鍣?URL锛圚TTP 浼犺緭锛?|
+| `args` | String[] | 鈥?| 鍛戒护琛屽弬鏁?|
+| `env` | Object | 鈥?| 鐜鍙橀噺锛堟敮鎸?`${VAR_NAME}` 鎻掑€硷級 |
+| `headers` | Object | 鈥?| HTTP 璇锋眰澶达紙浠呰繙绋嬫ā寮忥級 |
+| `enabled` | Bool | 鈥?| 鏄惁鍚敤锛堥粯璁?`true`锛岃涓?`false` 璺宠繃锛?|
 
-工具定义不在配置文件中 —— 启动时自动向服务器发送 `tools/list` JSON-RPC 请求动态发现。
-
-**文件热重载：** `mcp.json` 文件变更自动触发重新探测，无需重启。
-
+宸ュ叿瀹氫箟涓嶅湪閰嶇疆鏂囦欢涓?鈥斺€?鍚姩鏃惰嚜鍔ㄥ悜鏈嶅姟鍣ㄥ彂閫?`tools/list` JSON-RPC 璇锋眰鍔ㄦ€佸彂鐜般€?
+**鏂囦欢鐑噸杞斤細** `mcp.json` 鏂囦欢鍙樻洿鑷姩瑙﹀彂閲嶆柊鎺㈡祴锛屾棤闇€閲嶅惎銆?
 ---
 
-### Skill 配置（技能注入）
+### Skill 閰嶇疆锛堟妧鑳芥敞鍏ワ級
 
-Skill 定义 Agent 可以使用的专项能力。自动从三个目录发现和合并：
+Skill 瀹氫箟 Agent 鍙互浣跨敤鐨勪笓椤硅兘鍔涖€傝嚜鍔ㄤ粠涓変釜鐩綍鍙戠幇鍜屽悎骞讹細
 
 ```
-发现优先级：全局 → Agent 专属 → 助理专属
+鍙戠幇浼樺厛绾э細鍏ㄥ眬 鈫?Agent 涓撳睘 鈫?鍔╃悊涓撳睘
 ```
 
-**全局 Skill（所有 Agent 共享）：**
+**鍏ㄥ眬 Skill锛堟墍鏈?Agent 鍏变韩锛夛細**
 `~/.config/OpenTeam/skills/<name>/SKILL.md`
 
 ```markdown
@@ -499,63 +408,56 @@ You can create and edit Feishu documents. When asked to write documentation:
 3. Share the doc link in your response
 ```
 
-**Agent 专属 Skill：**
+**Agent 涓撳睘 Skill锛?*
 `agents/<agent-name>/skills/<name>/SKILL.md`
 
-**助理 Agent Skill：**
+**鍔╃悊 Agent Skill锛?*
 `~/.config/OpenTeam/assistant/skills/<name>/SKILL.md`
 
-Skill 内容自动注入 Agent 的 LLM System Prompt，作为"可用技能"区块。
-
-**文件热重载：** `SKILL.md` 文件变更自动生效。
-
+Skill 鍐呭鑷姩娉ㄥ叆 Agent 鐨?LLM System Prompt锛屼綔涓?鍙敤鎶€鑳?鍖哄潡銆?
+**鏂囦欢鐑噸杞斤細** `SKILL.md` 鏂囦欢鍙樻洿鑷姩鐢熸晥銆?
 ---
 
-### 内建工具
+### 鍐呭缓宸ュ叿
 
-无需配置，所有 Agent 自动可用：
-
-| 工具 | 说明 |
+鏃犻渶閰嶇疆锛屾墍鏈?Agent 鑷姩鍙敤锛?
+| 宸ュ叿 | 璇存槑 |
 |------|------|
-| `read_file` | 读取文件（UTF-8，≤100KB） |
-| `write_file` | 写入文件（自动创建目录） |
-| `glob_files` | 通配符搜索文件（≤100 结果） |
-| `grep_search` | 正则搜索文件内容 |
-| `list_directory` | 列出目录 |
-| `bash_exec` | 执行 Shell 命令（10s 超时） |
-| `web_fetch` | 获取 URL 内容 |
-| `send_feishu_message` | 发送飞书消息（支持话题回复） |
+| `read_file` | 璇诲彇鏂囦欢锛圲TF-8锛屸墹100KB锛?|
+| `write_file` | 鍐欏叆鏂囦欢锛堣嚜鍔ㄥ垱寤虹洰褰曪級 |
+| `glob_files` | 閫氶厤绗︽悳绱㈡枃浠讹紙鈮?00 缁撴灉锛?|
+| `grep_search` | 姝ｅ垯鎼滅储鏂囦欢鍐呭 |
+| `list_directory` | 鍒楀嚭鐩綍 |
+| `bash_exec` | 鎵ц Shell 鍛戒护锛?0s 瓒呮椂锛?|
+| `web_fetch` | 鑾峰彇 URL 鍐呭 |
+| `send_feishu_message` | 鍙戦€侀涔︽秷鎭紙鏀寔璇濋鍥炲锛?|
 
 ---
 
-## 快速开始
+## 蹇€熷紑濮?
+### 鍓嶇疆鏉′欢
 
-### 前置条件
-
-| 依赖 | 版本 | 用途 | 安装 |
+| 渚濊禆 | 鐗堟湰 | 鐢ㄩ€?| 瀹夎 |
 |------|------|------|------|
-| Rust | ≥ 1.75 | 核心引擎 | [rustup](https://rustup.rs/) |
-| Node.js | ≥ 18 | 插件宿主 | [nodejs.org](https://nodejs.org/) |
-| lark-cli | 最新 | 飞书集成 | [飞书 CLI 指南](https://open.feishu.cn/document/uYjL24iN/uMDMxEjLzAjMx4yM0ITM) |
-| Ollama (可选) | ≥ 0.1 | 本地 LLM | [ollama.com](https://ollama.com/) |
+| Rust | 鈮?1.75 | 鏍稿績寮曟搸 | [rustup](https://rustup.rs/) |
+| Node.js | 鈮?18 | 鎻掍欢瀹夸富 | [nodejs.org](https://nodejs.org/) |
+| lark-cli | 鏈€鏂?| 椋炰功闆嗘垚 | [椋炰功 CLI 鎸囧崡](https://open.feishu.cn/document/uYjL24iN/uMDMxEjLzAjMx4yM0ITM) |
+| Ollama (鍙€? | 鈮?0.1 | 鏈湴 LLM | [ollama.com](https://ollama.com/) |
 
-### 第一步：克隆 & 构建
+### 绗竴姝ワ細鍏嬮殕 & 鏋勫缓
 
 ```bash
 git clone <repo-url>
 cd feishu-agent-orchestrator
 
-# 构建全部（首次约 2-3 分钟）
-cargo build
+# 鏋勫缓鍏ㄩ儴锛堥娆＄害 2-3 鍒嗛挓锛?cargo build
 
-# 运行测试（57 tests）
-cargo test
+# 杩愯娴嬭瘯锛?7 tests锛?cargo test
 ```
 
-### 第二步：配置 API 密钥
+### 绗簩姝ワ細閰嶇疆 API 瀵嗛挜
 
-根据你使用的 LLM 设置环境变量：
-
+鏍规嵁浣犱娇鐢ㄧ殑 LLM 璁剧疆鐜鍙橀噺锛?
 ```bash
 # Windows PowerShell
 $env:ANTHROPIC_API_KEY = "sk-ant-xxx"
@@ -566,18 +468,17 @@ export ANTHROPIC_API_KEY=sk-ant-xxx
 export DEEPSEEK_API_KEY=sk-ds-xxx
 ```
 
-如果使用 Ollama 本地模型（无需 API Key）：
+濡傛灉浣跨敤 Ollama 鏈湴妯″瀷锛堟棤闇€ API Key锛夛細
 
 ```bash
 ollama pull qwen2.5:3b
 ollama serve
 ```
 
-### 第三步：创建 Agent
+### 绗笁姝ワ細鍒涘缓 Agent
 
-`agents/pm.yaml` 已自带一个示例 Agent（产品经理"小红"）。你也可以创建自己的：
-
-**`agents/dev.yaml`：**
+`agents/pm.yaml` 宸茶嚜甯︿竴涓ず渚?Agent锛堜骇鍝佺粡鐞?灏忕孩"锛夈€備綘涔熷彲浠ュ垱寤鸿嚜宸辩殑锛?
+**`agents/dev.yaml`锛?*
 ```yaml
 name: "CodeCat"
 role: "You are a senior backend engineer."
@@ -592,22 +493,21 @@ triggers:
     auto_respond: true
 ```
 
-### 第四步：运行
+### 绗洓姝ワ細杩愯
 
 ```bash
-# 启动 TUI 终端界面
+# 鍚姩 TUI 缁堢鐣岄潰
 cargo run -p feishu-agent-tui
 ```
 
-在 TUI 中按 **F1** 查看 Agent 列表，**F2** 查看详情，**F5** 查看飞书状态。
-
-### 第五步（可选）：配置 MCP 工具
+鍦?TUI 涓寜 **F1** 鏌ョ湅 Agent 鍒楄〃锛?*F2** 鏌ョ湅璇︽儏锛?*F5** 鏌ョ湅椋炰功鐘舵€併€?
+### 绗簲姝ワ紙鍙€夛級锛氶厤缃?MCP 宸ュ叿
 
 ```bash
-# 创建全局 MCP 配置目录
+# 鍒涘缓鍏ㄥ眬 MCP 閰嶇疆鐩綍
 mkdir -p ~/.config/OpenTeam
 
-# 写入 MCP 配置
+# 鍐欏叆 MCP 閰嶇疆
 cat > ~/.config/OpenTeam/mcp.json << 'EOF'
 {
   "mcpServers": {}
@@ -615,10 +515,10 @@ cat > ~/.config/OpenTeam/mcp.json << 'EOF'
 EOF
 ```
 
-### 第六步（可选）：配置 Skill
+### 绗叚姝ワ紙鍙€夛級锛氶厤缃?Skill
 
 ```bash
-# 创建全局 Skill
+# 鍒涘缓鍏ㄥ眬 Skill
 mkdir -p ~/.config/OpenTeam/skills/feishu-doc
 
 cat > ~/.config/OpenTeam/skills/feishu-doc/SKILL.md << 'EOF'
@@ -633,78 +533,70 @@ You can create Feishu documents using lark-cli.
 EOF
 ```
 
-### 第七步（可选）：配置飞书
-
+### 绗竷姝ワ紙鍙€夛級锛氶厤缃涔?
 ```bash
-# 登录飞书 CLI
+# 鐧诲綍椋炰功 CLI
 lark-cli login
 
-# 验证登录
+# 楠岃瘉鐧诲綍
 lark-cli auth check
 
-# 设置飞书群 ID（用于发送消息）
+# 璁剧疆椋炰功缇?ID锛堢敤浜庡彂閫佹秷鎭級
 export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
 ```
 
-配置状态可在 TUI F5 页面查看。
-
-## 项目结构
+閰嶇疆鐘舵€佸彲鍦?TUI F5 椤甸潰鏌ョ湅銆?
+## 椤圭洰缁撴瀯
 
 ```
-├── Cargo.toml                     # Workspace 定义
-├── llm_config.yaml                # 全局 LLM 模型池
-├── agents/                        # Agent YAML 配置
-│   └── pm.yaml                    # 示例 Agent
-├── crates/core/                   # Rust Core 库
-│   └── src/
-│       ├── config/                # 配置解析
-│       ├── registry/              # Agent 注册中心
-│       ├── llm/                   # LLM Gateway (Anthropic/DeepSeek/Ollama)
-│       ├── feishu/                # 飞书 CLI Bridge
-│       ├── memory/                # 三层记忆系统
-│       ├── agent/                 # Agent 生命周期 + 话题隔离
-│       ├── router/                # 消息路由 + Trigger 匹配
-│       ├── assistant/             # 助理 Agent
-│       ├── mcp/                   # MCP 工具执行引擎
-│       ├── skill/                 # Skill 自动发现
-│       ├── plugin/                # 插件管理器
-│       └── error.rs               # 统一错误类型
-├── crates/tui/                    # TUI 终端界面 (Ratatui)
-├── plugins/                       # Node.js 插件宿主
-└── docs/superpowers/              # 设计文档
+鈹溾攢鈹€ Cargo.toml                     # Workspace 瀹氫箟
+鈹溾攢鈹€ llm_config.yaml                # 鍏ㄥ眬 LLM 妯″瀷姹?鈹溾攢鈹€ agents/                        # Agent YAML 閰嶇疆
+鈹?  鈹斺攢鈹€ pm.yaml                    # 绀轰緥 Agent
+鈹溾攢鈹€ crates/core/                   # Rust Core 搴?鈹?  鈹斺攢鈹€ src/
+鈹?      鈹溾攢鈹€ config/                # 閰嶇疆瑙ｆ瀽
+鈹?      鈹溾攢鈹€ registry/              # Agent 娉ㄥ唽涓績
+鈹?      鈹溾攢鈹€ llm/                   # LLM Gateway (Anthropic/DeepSeek/Ollama)
+鈹?      鈹溾攢鈹€ feishu/                # 椋炰功 CLI Bridge
+鈹?      鈹溾攢鈹€ memory/                # 涓夊眰璁板繂绯荤粺
+鈹?      鈹溾攢鈹€ agent/                 # Agent 鐢熷懡鍛ㄦ湡 + 璇濋闅旂
+鈹?      鈹溾攢鈹€ router/                # 娑堟伅璺敱 + Trigger 鍖归厤
+鈹?      鈹溾攢鈹€ assistant/             # 鍔╃悊 Agent
+鈹?      鈹溾攢鈹€ mcp/                   # MCP 宸ュ叿鎵ц寮曟搸
+鈹?      鈹溾攢鈹€ skill/                 # Skill 鑷姩鍙戠幇
+鈹?      鈹溾攢鈹€ plugin/                # 鎻掍欢绠＄悊鍣?鈹?      鈹斺攢鈹€ error.rs               # 缁熶竴閿欒绫诲瀷
+鈹溾攢鈹€ crates/tui/                    # TUI 缁堢鐣岄潰 (Ratatui)
+鈹溾攢鈹€ plugins/                       # Node.js 鎻掍欢瀹夸富
+鈹斺攢鈹€ docs/superpowers/              # 璁捐鏂囨。
 ```
 
-## 测试
+## 娴嬭瘯
 
 ```bash
-# 运行所有测试
-cargo test --workspace
+# 杩愯鎵€鏈夋祴璇?cargo test --workspace
 
-# 只运行单元测试
-cargo test --lib
+# 鍙繍琛屽崟鍏冩祴璇?cargo test --lib
 
-# 运行特定模块测试
+# 杩愯鐗瑰畾妯″潡娴嬭瘯
 cargo test memory::forgetting
 cargo test assistant::time_policy
 
-# 运行冒烟测试
+# 杩愯鍐掔儫娴嬭瘯
 cargo test --test smoke_test
 ```
 
-## 技术栈
+## 鎶€鏈爤
 
-| 层 | 技术 |
+| 灞?| 鎶€鏈?|
 |---|------|
-| 核心引擎 | Rust (Tokio async) |
+| 鏍稿績寮曟搸 | Rust (Tokio async) |
 | TUI | Ratatui + Crossterm |
 | LLM | Anthropic Claude / DeepSeek V4 / Ollama |
-| 存储 | SQLite (sqlx) |
-| 向量化 | ONNX Runtime / hash-based fallback |
-| 飞书 | lark-cli |
-| MCP | stdio / HTTP 传输，标准 JSON-RPC |
-| 插件 | Node.js + JSON-RPC over stdio |
-| 文件监控 | notify (热重载) |
+| 瀛樺偍 | SQLite (sqlx) |
+| 鍚戦噺鍖?| ONNX Runtime / hash-based fallback |
+| 椋炰功 | lark-cli |
+| MCP | stdio / HTTP 浼犺緭锛屾爣鍑?JSON-RPC |
+| 鎻掍欢 | Node.js + JSON-RPC over stdio |
+| 鏂囦欢鐩戞帶 | notify (鐑噸杞? |
 
-## 许可证
-
+## 璁稿彲璇?
 [Apache License 2.0](LICENSE)
