@@ -18,11 +18,11 @@ impl McpRegistry {
         }
     }
 
-    /// Load all MCP configs from multiple directories and merge
-    pub fn discover_all(dirs: &[PathBuf]) -> Result<Self, CoreError> {
+    /// Load MCP configs from multiple mcps.json file paths and merge
+    pub fn discover_all(config_paths: &[PathBuf]) -> Result<Self, CoreError> {
         let mut registry = Self::new();
-        for dir in dirs {
-            let configs = discover_mcp_configs(dir)?;
+        for path in config_paths {
+            let configs = load_mcp_configs(path)?;
             for cfg in configs {
                 registry.servers.entry(cfg.name.clone()).or_insert(cfg);
             }
@@ -30,7 +30,7 @@ impl McpRegistry {
         Ok(registry)
     }
 
-    /// Get all tool definitions for agents that have access to these MCP servers
+    /// Get all tool definitions for all discovered MCP servers
     pub fn get_all_tools(&self) -> Vec<ToolDefinition> {
         self.servers
             .values()
@@ -51,10 +51,10 @@ impl McpRegistry {
         self.servers.values().collect()
     }
 
-    /// Start a file watcher for hot-reload (same pattern as SkillRegistry)
+    /// Start a file watcher for hot-reload (watches parent dirs of mcps.json files)
     pub fn start_watcher(
         registry: Arc<RwLock<Self>>,
-        watch_dirs: Vec<PathBuf>,
+        watch_files: Vec<PathBuf>,
     ) -> Result<tokio::task::JoinHandle<()>, CoreError> {
         use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
         use std::sync::mpsc;
@@ -63,50 +63,47 @@ impl McpRegistry {
         let mut watcher = RecommendedWatcher::new(tx, Config::default())
             .map_err(|e| CoreError::Mcp(format!("Create watcher: {e}")))?;
 
-        for dir in &watch_dirs {
-            if dir.exists() {
-                watcher
-                    .watch(dir, RecursiveMode::Recursive)
-                    .map_err(|e| CoreError::Mcp(format!("Watch {:?}: {e}", dir)))?;
-                tracing::info!("[MCP Watcher] Watching: {:?}", dir);
+        // Watch the parent directory of each mcps.json file
+        let mut watched_parents: Vec<PathBuf> = Vec::new();
+        for f in &watch_files {
+            if let Some(parent) = f.parent() {
+                if parent.exists() && !watched_parents.iter().any(|p| p == parent) {
+                    watcher
+                        .watch(parent, RecursiveMode::NonRecursive)
+                        .map_err(|e| CoreError::Mcp(format!("Watch {:?}: {e}", parent)))?;
+                    watched_parents.push(parent.to_path_buf());
+                    tracing::info!("[MCP Watcher] Watching: {:?} for mcps.json changes", parent);
+                }
             }
         }
 
+        let watch_files_clone = watch_files.clone();
         let handle = tokio::task::spawn_blocking(move || {
             let _watcher = watcher;
             for res in rx {
                 match res {
                     Ok(event) => {
-                        let is_config_change = matches!(
+                        let is_mcps_change = matches!(
                             event.kind,
                             EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
                         ) && event.paths.iter().any(|p| {
-                            p.file_name()
-                                .and_then(|n| n.to_str())
-                                == Some("mcp.json")
+                            p.file_name().and_then(|n| n.to_str()) == Some("mcps.json")
                         });
 
-                        if is_config_change {
-                            tracing::info!(
-                                "[MCP Watcher] mcp.json changed, hot-reloading..."
-                            );
+                        if is_mcps_change {
+                            tracing::info!("[MCP Watcher] mcps.json changed, hot-reloading...");
                             let mut reg = registry.blocking_write();
                             reg.servers.clear();
-                            for dir in &watch_dirs {
-                                if dir.exists() {
-                                    if let Ok(configs) = discover_mcp_configs(dir) {
+                            for path in &watch_files_clone {
+                                if path.exists() {
+                                    if let Ok(configs) = load_mcp_configs(path) {
                                         for cfg in configs {
-                                            reg.servers
-                                                .entry(cfg.name.clone())
-                                                .or_insert(cfg);
+                                            reg.servers.entry(cfg.name.clone()).or_insert(cfg);
                                         }
                                     }
                                 }
                             }
-                            tracing::info!(
-                                "[MCP Watcher] Hot-reload complete — {} servers",
-                                reg.servers.len()
-                            );
+                            tracing::info!("[MCP Watcher] Hot-reload complete — {} servers", reg.servers.len());
                         }
                     }
                     Err(e) => tracing::error!("[MCP Watcher] Error: {e}"),
@@ -125,14 +122,14 @@ fn home_dir() -> std::path::PathBuf {
         .unwrap_or_else(|_| std::path::PathBuf::from("."))
 }
 
-/// Get the global MCP configs directory path (~/.config/OpenTeam/mcps/)
-pub fn global_mcp_dir() -> std::path::PathBuf {
-    home_dir().join(".config/OpenTeam/mcps")
+/// Path to the global MCP config file (~/.config/OpenTeam/mcps.json)
+pub fn global_mcp_path() -> PathBuf {
+    home_dir().join(".config/OpenTeam/mcps.json")
 }
 
-/// Get the assistant MCP configs directory path (~/.config/OpenTeam/assistant/mcps/)
-pub fn assistant_mcp_dir() -> std::path::PathBuf {
-    home_dir().join(".config/OpenTeam/assistant/mcps")
+/// Path to the assistant MCP config file (~/.config/OpenTeam/assistant/mcps.json)
+pub fn assistant_mcp_path() -> PathBuf {
+    home_dir().join(".config/OpenTeam/assistant/mcps.json")
 }
 
 #[cfg(test)]
@@ -141,43 +138,30 @@ mod tests {
     use std::io::Write;
 
     #[test]
-    fn test_discover_all_multiple_dirs() {
-        let tmp1 = std::env::temp_dir().join("feishu_mcp_registry_test1");
-        let tmp2 = std::env::temp_dir().join("feishu_mcp_registry_test2");
-        let server_dir1 = tmp1.join("github");
-        let server_dir2 = tmp2.join("postgres");
-        let _ = std::fs::create_dir_all(&server_dir1);
-        let _ = std::fs::create_dir_all(&server_dir2);
+    fn test_discover_all_multiple_files() {
+        let tmp1 = std::env::temp_dir().join("feishu_mcp_reg_test1");
+        let tmp2 = std::env::temp_dir().join("feishu_mcp_reg_test2");
+        let _ = std::fs::create_dir_all(&tmp1);
+        let _ = std::fs::create_dir_all(&tmp2);
 
-        let json1 = r#"{
-            "name": "github",
-            "description": "GitHub API",
-            "command": "node",
-            "args": [],
-            "env": {},
-            "tools": [{"name": "create_issue", "description": "Create issue", "input_schema": {}}]
-        }"#;
-        let json2 = r#"{
-            "name": "postgres",
-            "description": "PostgreSQL",
-            "command": "python",
-            "args": [],
-            "env": {},
-            "tools": [{"name": "query", "description": "Run query", "input_schema": {}}]
-        }"#;
+        let json1 = r#"[
+            {"name": "github", "description": "GitHub API", "command": "node", "args": [], "env": {}, "tools": [{"name": "create_issue", "description": "Create issue", "input_schema": {}}]}
+        ]"#;
+        let json2 = r#"[
+            {"name": "postgres", "description": "PostgreSQL", "command": "python", "args": [], "env": {}, "tools": [{"name": "query", "description": "Run query", "input_schema": {}}]}
+        ]"#;
 
-        let mut f1 = std::fs::File::create(&server_dir1.join("mcp.json")).unwrap();
+        let p1 = tmp1.join("mcps.json");
+        let p2 = tmp2.join("mcps.json");
+        let mut f1 = std::fs::File::create(&p1).unwrap();
         f1.write_all(json1.as_bytes()).unwrap();
-        let mut f2 = std::fs::File::create(&server_dir2.join("mcp.json")).unwrap();
+        let mut f2 = std::fs::File::create(&p2).unwrap();
         f2.write_all(json2.as_bytes()).unwrap();
 
-        let registry = McpRegistry::discover_all(&[tmp1.clone(), tmp2.clone()]).unwrap();
+        let registry = McpRegistry::discover_all(&[p1, p2]).unwrap();
         assert_eq!(registry.list_servers().len(), 2);
         assert_eq!(registry.get_tools_for(&["github".to_string()]).len(), 1);
-        assert_eq!(
-            registry.get_tools_for(&["postgres".to_string()])[0].name,
-            "query"
-        );
+        assert_eq!(registry.get_tools_for(&["postgres".to_string()])[0].name, "query");
 
         let _ = std::fs::remove_dir_all(&tmp1);
         let _ = std::fs::remove_dir_all(&tmp2);
@@ -186,26 +170,18 @@ mod tests {
     #[test]
     fn test_get_all_tools() {
         let tmp = std::env::temp_dir().join("feishu_mcp_alltools_test");
-        let server_dir = tmp.join("github");
-        let _ = std::fs::create_dir_all(&server_dir);
-
-        let json = r#"{
-            "name": "github",
-            "description": "",
-            "command": "node",
-            "args": [],
-            "env": {},
-            "tools": [
+        let _ = std::fs::create_dir_all(&tmp);
+        let path = tmp.join("mcps.json");
+        let json = r#"[
+            {"name": "github", "description": "", "command": "node", "args": [], "env": {}, "tools": [
                 {"name": "create_issue", "description": "a", "input_schema": {}},
                 {"name": "search_code", "description": "b", "input_schema": {}}
-            ]
-        }"#;
-        let mut f = std::fs::File::create(&server_dir.join("mcp.json")).unwrap();
+            ]}
+        ]"#;
+        let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(json.as_bytes()).unwrap();
-
-        let registry = McpRegistry::discover_all(&[tmp.clone()]).unwrap();
+        let registry = McpRegistry::discover_all(&[path]).unwrap();
         assert_eq!(registry.get_all_tools().len(), 2);
-
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

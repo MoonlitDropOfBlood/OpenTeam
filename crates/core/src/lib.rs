@@ -93,21 +93,21 @@ impl Core {
             }
         }
 
-        // Discover MCP servers: global + assistant + per-agent
-        let global_mcp_dir = mcp::registry::global_mcp_dir();
-        let asst_mcp_dir = mcp::registry::assistant_mcp_dir();
-        let mut mcp_dirs = vec![global_mcp_dir.clone()];
-        if asst_mcp_dir.exists() {
-            mcp_dirs.push(asst_mcp_dir.clone());
+        // Discover MCP servers: global + assistant + per-agent mcps.json files
+        let global_mcp_path = mcp::registry::global_mcp_path();
+        let asst_mcp_path = mcp::registry::assistant_mcp_path();
+        let mut mcp_paths = vec![global_mcp_path.clone()];
+        if asst_mcp_path.exists() {
+            mcp_paths.push(asst_mcp_path.clone());
         }
         for record in registry.all() {
-            let agent_mcp_dir = agents_dir.join(&record.config.name).join("mcps");
-            if agent_mcp_dir.exists() {
-                mcp_dirs.push(agent_mcp_dir);
+            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcps.json");
+            if agent_mcp_path.exists() {
+                mcp_paths.push(agent_mcp_path);
             }
         }
         let mcp_registry = Arc::new(RwLock::new(
-            mcp::registry::McpRegistry::discover_all(&mcp_dirs)?
+            mcp::registry::McpRegistry::discover_all(&mcp_paths)?
         ));
 
         Ok(Self {
@@ -171,22 +171,22 @@ impl Core {
 
         // Start MCP file watcher
         let mcp_registry = self.mcp_registry.clone();
-        let global_mcp_dir = mcp::registry::global_mcp_dir();
-        let asst_mcp_dir = mcp::registry::assistant_mcp_dir();
-        let mut mcp_watch_dirs = vec![global_mcp_dir];
-        if asst_mcp_dir.exists() {
-            mcp_watch_dirs.push(asst_mcp_dir);
+        let global_mcp_path = mcp::registry::global_mcp_path();
+        let asst_mcp_path = mcp::registry::assistant_mcp_path();
+        let mut mcp_watch_files = vec![global_mcp_path];
+        if asst_mcp_path.exists() {
+            mcp_watch_files.push(asst_mcp_path);
         }
+        let agents_dir = std::path::PathBuf::from("agents");
         for record in self.registry.all() {
-            let agents_dir = std::path::PathBuf::from("agents");
-            let agent_mcp_dir = agents_dir.join(&record.config.name).join("mcps");
-            if agent_mcp_dir.exists() {
-                mcp_watch_dirs.push(agent_mcp_dir);
+            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcps.json");
+            if agent_mcp_path.exists() {
+                mcp_watch_files.push(agent_mcp_path);
             }
         }
         if let Ok(watcher) = mcp::registry::McpRegistry::start_watcher(
             mcp_registry,
-            mcp_watch_dirs,
+            mcp_watch_files,
         ) {
             self.mcp_watcher_handle = Some(watcher);
             tracing::info!("MCP file watcher started");
