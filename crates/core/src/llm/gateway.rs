@@ -283,6 +283,15 @@ impl LlmGateway {
                 })
             }).collect();
             body["tools"] = serde_json::json!(tools);
+            body["tool_choice"] = serde_json::json!("auto");
+        }
+
+        // DeepSeek V4 enables "thinking" mode by default, which returns
+        // reasoning_content in responses. Our stateless gateway does not
+        // round-trip reasoning_content, causing 400 errors on multi-turn
+        // conversations with tool calls. Disable it explicitly.
+        if config.provider == "deepseek" {
+            body["thinking"] = serde_json::json!({"type": "disabled"});
         }
 
         // Determine API base URL based on provider
