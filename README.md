@@ -293,30 +293,386 @@ cd plugins/host && node src/index.js
 └── docs/superpowers/              # 设计文档
 ```
 
-## Agent YAML 配置参考
+## 配置参考
+
+系统有四种配置：Agent 定义、LLM 模型池、MCP 工具、Skill 技能。全部支持文件热重载。
+
+---
+
+### Agent YAML 配置
+
+Agent 通过 YAML 文件定义，放在 `agents/` 目录下自动加载。
+
+**最小配置：**
+```yaml
+name: "CodeCat"
+role: "You are a senior backend engineer."
+llm:
+  primary:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 8192
+```
+
+**完整配置：**
+```yaml
+name: "CodeCat"
+role: "You are a senior backend engineer, skilled in Rust and system architecture."
+personality: "Rigorous, organized, code-quality focused"
+llm:
+  primary:
+    provider: deepseek
+    model: deepseek-v4-pro
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+    timeout_secs: 120
+    rate_limit: { rpm: 50, tpm: 100000 }
+  fallback:
+    provider: deepseek
+    model: deepseek-v4-flash
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 4096
+    timeout_secs: 60
+triggers:
+  - pattern: "开发|实现|代码|架构"
+    auto_respond: true
+  - pattern: "@Dev|@CodeCat"
+    auto_respond: true
+```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `name` | String | 是 | Agent 名称（用于 @mention） |
-| `role` | String | 是 | System Prompt，定义角色行为 |
-| `personality` | String | 否 | 性格描述 |
-| `llm.primary` | Object | 是 | 主 LLM 配置 |
-| `llm.fallback` | Object | 否 | 降级 LLM 配置 |
-| `triggers[].pattern` | String | 是 | 触发关键词（正则） |
-| `triggers[].auto_respond` | Bool | 否 | 是否自动响应（默认 true） |
-| `skills[]` | String[] | 否 | 绑定的 Skill 列表 |
-| `mcps[]` | String[] | 否 | 绑定的 MCP 工具列表 |
+| `name` | String | ✅ | Agent 名称（用于 @mention） |
+| `role` | String | ✅ | System Prompt，定义角色行为 |
+| `personality` | String | — | 性格描述 |
+| `llm.primary` | Object | ✅ | 主 LLM 配置（见下方 ModelConfig） |
+| `llm.fallback` | Object | — | 降级 LLM 配置（primary 失败时自动切换） |
+| `triggers[].pattern` | String | — | 触发关键词（正则表达式） |
+| `triggers[].auto_respond` | Bool | — | 是否自动响应（默认 `true`） |
 
-### ModelConfig 字段
+Agent 的 `skills` 和 `mcps` 字段已移除 —— 现在通过文件系统自动发现（见下方）。
+
+---
+
+### LLM 配置
+
+#### ModelConfig（Agent YAML 内嵌）
+
+每个 Agent 在 `llm.primary` 中定义自己的模型：
+
+```yaml
+llm:
+  primary:
+    provider: anthropic                    # 必填: anthropic | ollama | deepseek
+    model: claude-sonnet-4-20250514        # 必填: 模型 ID
+    api_key_env: ANTHROPIC_API_KEY         # 可选: API Key 环境变量名
+    max_tokens: 8192                       # 必填: 最大输出 token
+    timeout_secs: 120                      # 可选: API 超时（秒）
+    rate_limit: { rpm: 50, tpm: 100000 }   # 可选: 速率限制
+```
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `provider` | String | 模型提供商。`anthropic` / `ollama` / `deepseek` |
+| `model` | String | 模型 ID。如 `claude-sonnet-4-20250514`、`deepseek-v4-pro`、`qwen2.5:3b` |
+| `api_key_env` | String | API Key 对应的环境变量名。不设置则使用默认名（`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`） |
+| `max_tokens` | u32 | 最大输出 token 数 |
+| `timeout_secs` | u64 | API 调用超时（默认 120s） |
+| `rate_limit` | Object | `{ rpm: number, tpm: number }` 速率限制 |
+
+#### 全局模型池（可选）
+
+`llm_config.yaml` 定义共享模型池，Agent 可以通过此池引用模型（Agent 内嵌配置优先级更高）：
+
+```yaml
+models:
+  claude-sonnet-4:
+    provider: anthropic
+    model: claude-sonnet-4-20250514
+    api_key_env: ANTHROPIC_API_KEY
+    max_tokens: 8192
+    timeout_secs: 120
+    rate_limit: { rpm: 50, tpm: 100000 }
+
+  deepseek-v4-pro:
+    provider: deepseek
+    model: deepseek-v4-pro
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+    timeout_secs: 120
+    rate_limit: { rpm: 50, tpm: 200000 }
+
+  deepseek-v4-flash:
+    provider: deepseek
+    model: deepseek-v4-flash
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+    timeout_secs: 120
+    rate_limit: { rpm: 100, tpm: 500000 }
+
+  ollama-qwen:
+    provider: ollama
+    model: qwen2.5:3b
+    max_tokens: 4096
+    timeout_secs: 60
+```
+
+**支持的 Provider：**
+
+| Provider | API 端点 | 认证 |
+|----------|---------|------|
+| `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` |
+| `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` |
+| `ollama` | `http://localhost:11434/api/chat` | 无需认证 |
+
+---
+
+### MCP 配置（工具调用）
+
+MCP（Model Context Protocol）服务器配置放在 `~/.config/OpenTeam/mcp.json`。
+支持本地子进程和远程 HTTP 两种传输方式。
+
+**标准格式：**
+
+```json
+{
+  "mcpServers": {
+    "github": {
+      "command": "node",
+      "args": ["path/to/github-mcp-server"],
+      "env": {
+        "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+      },
+      "enabled": true
+    },
+    "remote-api": {
+      "url": "https://api.example.com/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_TOKEN}"
+      },
+      "enabled": true
+    }
+  }
+}
+```
 
 | 字段 | 类型 | 必填 | 说明 |
 |------|------|------|------|
-| `provider` | String | 是 | `anthropic` 或 `ollama` |
-| `model` | String | 是 | 模型 ID |
-| `api_key_env` | String | 否 | 环境变量名（API Key） |
-| `max_tokens` | u32 | 是 | 最大输出 token 数 |
-| `timeout_secs` | u64 | 否 | API 超时（默认 120s） |
-| `rate_limit` | Object | 否 | RPM/TPM 限流配置 |
+| `command` | String | 互斥 | 本地服务器可执行文件路径（stdio 传输） |
+| `url` | String | 互斥 | 远程服务器 URL（HTTP 传输） |
+| `args` | String[] | — | 命令行参数 |
+| `env` | Object | — | 环境变量（支持 `${VAR_NAME}` 插值） |
+| `headers` | Object | — | HTTP 请求头（仅远程模式） |
+| `enabled` | Bool | — | 是否启用（默认 `true`，设为 `false` 跳过） |
+
+工具定义不在配置文件中 —— 启动时自动向服务器发送 `tools/list` JSON-RPC 请求动态发现。
+
+**文件热重载：** `mcp.json` 文件变更自动触发重新探测，无需重启。
+
+---
+
+### Skill 配置（技能注入）
+
+Skill 定义 Agent 可以使用的专项能力。自动从三个目录发现和合并：
+
+```
+发现优先级：全局 → Agent 专属 → 助理专属
+```
+
+**全局 Skill（所有 Agent 共享）：**
+`~/.config/OpenTeam/skills/<name>/SKILL.md`
+
+```markdown
+---
+name: feishu-doc
+description: Create and manage Feishu documents
+---
+
+# Feishu Doc Skill
+
+## Instructions
+You can create and edit Feishu documents. When asked to write documentation:
+
+1. Create a new Feishu doc using `lark-cli doc +create --title <title>`
+2. Write content using Feishu markdown format
+3. Share the doc link in your response
+```
+
+**Agent 专属 Skill：**
+`agents/<agent-name>/skills/<name>/SKILL.md`
+
+**助理 Agent Skill：**
+`~/.config/OpenTeam/assistant/skills/<name>/SKILL.md`
+
+Skill 内容自动注入 Agent 的 LLM System Prompt，作为"可用技能"区块。
+
+**文件热重载：** `SKILL.md` 文件变更自动生效。
+
+---
+
+### 内建工具
+
+无需配置，所有 Agent 自动可用：
+
+| 工具 | 说明 |
+|------|------|
+| `read_file` | 读取文件（UTF-8，≤100KB） |
+| `write_file` | 写入文件（自动创建目录） |
+| `glob_files` | 通配符搜索文件（≤100 结果） |
+| `grep_search` | 正则搜索文件内容 |
+| `list_directory` | 列出目录 |
+| `bash_exec` | 执行 Shell 命令（10s 超时） |
+| `web_fetch` | 获取 URL 内容 |
+| `send_feishu_message` | 发送飞书消息（支持话题回复） |
+
+---
+
+## 快速开始
+
+### 前置条件
+
+| 依赖 | 版本 | 用途 | 安装 |
+|------|------|------|------|
+| Rust | ≥ 1.75 | 核心引擎 | [rustup](https://rustup.rs/) |
+| Node.js | ≥ 18 | 插件宿主 | [nodejs.org](https://nodejs.org/) |
+| lark-cli | 最新 | 飞书集成 | [飞书 CLI 指南](https://open.feishu.cn/document/uYjL24iN/uMDMxEjLzAjMx4yM0ITM) |
+| Ollama (可选) | ≥ 0.1 | 本地 LLM | [ollama.com](https://ollama.com/) |
+
+### 第一步：克隆 & 构建
+
+```bash
+git clone <repo-url>
+cd feishu-agent-orchestrator
+
+# 构建全部（首次约 2-3 分钟）
+cargo build
+
+# 运行测试（57 tests）
+cargo test
+```
+
+### 第二步：配置 API 密钥
+
+根据你使用的 LLM 设置环境变量：
+
+```bash
+# Windows PowerShell
+$env:ANTHROPIC_API_KEY = "sk-ant-xxx"
+$env:DEEPSEEK_API_KEY = "sk-ds-xxx"
+
+# macOS / Linux
+export ANTHROPIC_API_KEY=sk-ant-xxx
+export DEEPSEEK_API_KEY=sk-ds-xxx
+```
+
+如果使用 Ollama 本地模型（无需 API Key）：
+
+```bash
+ollama pull qwen2.5:3b
+ollama serve
+```
+
+### 第三步：创建 Agent
+
+`agents/pm.yaml` 已自带一个示例 Agent（产品经理"小红"）。你也可以创建自己的：
+
+**`agents/dev.yaml`：**
+```yaml
+name: "CodeCat"
+role: "You are a senior backend engineer."
+llm:
+  primary:
+    provider: deepseek
+    model: deepseek-v4-flash
+    api_key_env: DEEPSEEK_API_KEY
+    max_tokens: 8192
+triggers:
+  - pattern: "@CodeCat|@Dev"
+    auto_respond: true
+```
+
+### 第四步：运行
+
+```bash
+# 启动 TUI 终端界面
+cargo run -p feishu-agent-tui
+```
+
+在 TUI 中按 **F1** 查看 Agent 列表，**F2** 查看详情，**F5** 查看飞书状态。
+
+### 第五步（可选）：配置 MCP 工具
+
+```bash
+# 创建全局 MCP 配置目录
+mkdir -p ~/.config/OpenTeam
+
+# 写入 MCP 配置
+cat > ~/.config/OpenTeam/mcp.json << 'EOF'
+{
+  "mcpServers": {}
+}
+EOF
+```
+
+### 第六步（可选）：配置 Skill
+
+```bash
+# 创建全局 Skill
+mkdir -p ~/.config/OpenTeam/skills/feishu-doc
+
+cat > ~/.config/OpenTeam/skills/feishu-doc/SKILL.md << 'EOF'
+---
+name: feishu-doc
+description: Create and manage Feishu documents
+---
+
+# Feishu Doc Skill
+
+You can create Feishu documents using lark-cli.
+EOF
+```
+
+### 第七步（可选）：配置飞书
+
+```bash
+# 登录飞书 CLI
+lark-cli login
+
+# 验证登录
+lark-cli auth check
+
+# 设置飞书群 ID（用于发送消息）
+export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
+```
+
+配置状态可在 TUI F5 页面查看。
+
+## 项目结构
+
+```
+├── Cargo.toml                     # Workspace 定义
+├── llm_config.yaml                # 全局 LLM 模型池
+├── agents/                        # Agent YAML 配置
+│   └── pm.yaml                    # 示例 Agent
+├── crates/core/                   # Rust Core 库
+│   └── src/
+│       ├── config/                # 配置解析
+│       ├── registry/              # Agent 注册中心
+│       ├── llm/                   # LLM Gateway (Anthropic/DeepSeek/Ollama)
+│       ├── feishu/                # 飞书 CLI Bridge
+│       ├── memory/                # 三层记忆系统
+│       ├── agent/                 # Agent 生命周期 + 话题隔离
+│       ├── router/                # 消息路由 + Trigger 匹配
+│       ├── assistant/             # 助理 Agent
+│       ├── mcp/                   # MCP 工具执行引擎
+│       ├── skill/                 # Skill 自动发现
+│       ├── plugin/                # 插件管理器
+│       └── error.rs               # 统一错误类型
+├── crates/tui/                    # TUI 终端界面 (Ratatui)
+├── plugins/                       # Node.js 插件宿主
+└── docs/superpowers/              # 设计文档
+```
 
 ## 测试
 
@@ -335,35 +691,19 @@ cargo test assistant::time_policy
 cargo test --test smoke_test
 ```
 
-## 发展阶段
-
-| 阶段 | 状态 | 内容 |
-|------|------|------|
-| Phase 1 | ✅ 完成 | Rust Core 脚手架、Agent 配置/注册表、LLM Gateway、飞书 Bridge |
-| Phase 2 | ✅ 完成 | 记忆系统（三层 + 遗忘）、Agent 生命周期、消息路由、助理 Agent |
-| Phase 3 | ✅ 完成 | TUI 界面（5 页面）、Plugin 系统（Node.js 宿主 + Hook） |
-| 清理优化 | ✅ 完成 | 49 测试覆盖、TUI 连接真实数据、Agent LLM 调用、自动刷新、记忆浏览器 |
-
-### 未来方向
-
-- ONNX Runtime 全量集成（当前使用 stub）
-- Ollama 本地压缩（当前使用 rule-based fallback）
-- Agent 间真正协作（通过飞书群 @mention）
-- Supervisor 熔断器（插件崩溃自动隔离）
-- Web 管理控制台
-
 ## 技术栈
 
 | 层 | 技术 |
 |---|------|
 | 核心引擎 | Rust (Tokio async) |
 | TUI | Ratatui + Crossterm |
-| LLM | Anthropic Claude + Ollama |
+| LLM | Anthropic Claude / DeepSeek V4 / Ollama |
 | 存储 | SQLite (sqlx) |
-| 向量化 | ONNX Runtime (stub) / nomic-embed-text-v1 |
-| 压缩 | Ollama / qwen2.5:3b |
-| 飞书 | lark-cli (飞书 CLI) |
+| 向量化 | ONNX Runtime / hash-based fallback |
+| 飞书 | lark-cli |
+| MCP | stdio / HTTP 传输，标准 JSON-RPC |
 | 插件 | Node.js + JSON-RPC over stdio |
+| 文件监控 | notify (热重载) |
 
 ## 许可证
 
