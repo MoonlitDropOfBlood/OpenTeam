@@ -86,6 +86,22 @@ impl AgentManager {
     pub async fn agent_count(&self) -> usize {
         self.agents.read().await.len()
     }
+
+    /// Stop a specific agent by sending Stop command
+    pub async fn stop_agent(&self, id: &AgentId) -> Result<(), String> {
+        self.send_command(id, AgentCommand::Stop).await
+    }
+
+    /// Kill a specific agent by cancelling its token (hard stop, bypasses graceful shutdown)
+    pub async fn kill_agent(&self, id: &AgentId) -> Result<(), String> {
+        let mut agents = self.agents.write().await;
+        if let Some(handle) = agents.remove(id) {
+            handle.cancel_token.cancel();
+            Ok(())
+        } else {
+            Err(format!("Agent {id} not found"))
+        }
+    }
 }
 
 async fn agent_main_loop(
