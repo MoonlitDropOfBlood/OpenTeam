@@ -102,6 +102,8 @@ async fn agent_main_loop(
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
     let mut retry_count: u32 = 0;  // Per-agent escalation tracking
+    // Per-thread conversation history — key is thread_id (None = main channel)
+    let mut thread_histories: HashMap<Option<String>, Vec<ChatMessage>> = HashMap::new();
 
     // Build base system prompt: role + skill instructions (constant across messages)
     let base_prompt = skill_registry.read().await.build_system_prompt(&config.role);
@@ -211,26 +213,30 @@ async fn agent_main_loop(
                     }
                 };
 
-                // Build LLM request with enhanced prompt
+                // Build LLM request with enhanced prompt + thread history
+                let mut thread_msgs: Vec<ChatMessage> = Vec::new();
+                // Add previous conversation history for this thread
+                if let Some(history) = thread_histories.get(&msg.thread_id) {
+                    thread_msgs.extend(history.clone());
+                }
+                // Add current message
+                thread_msgs.push(ChatMessage {
+                    role: "user".into(),
+                    content: msg.content.clone(),
+                });
+
                 let request = ChatRequest {
                     model: config.llm.primary.model.clone(),
                     system_prompt: full_prompt.clone(),
-                    messages: vec![
-                        ChatMessage {
-                            role: "user".into(),
-                            content: msg.content.clone(),
-                        },
-                    ],
+                    messages: thread_msgs.clone(),
                     tools: tools.clone(),
                 };
 
-                // Collect messages for the conversation (may grow with tool calls)
-                let mut messages: Vec<ChatMessage> = vec![
-                    ChatMessage {
-                        role: "user".into(),
-                        content: msg.content.clone(),
-                    },
-                ];
+                // Track user message for thread history
+                let user_msg = ChatMessage {
+                    role: "user".into(),
+                    content: msg.content.clone(),
+                };
 
                 match llm_gateway.chat(&config.llm.primary, &request).await {
                     Ok(mut response) => {
@@ -259,7 +265,7 @@ async fn agent_main_loop(
                                 }));
                             }
 
-                            messages.push(ChatMessage {
+                            thread_msgs.push(ChatMessage {
                                 role: "assistant".into(),
                                 content: serde_json::to_string(&assistant_content)
                                     .unwrap_or_default(),
@@ -283,7 +289,7 @@ async fn agent_main_loop(
                                     "content": result,
                                 }]);
 
-                                messages.push(ChatMessage {
+thread_msgs.push(ChatMessage {
                                     role: "user".into(),
                                     content: serde_json::to_string(&tool_result_content)
                                         .unwrap_or_default(),
@@ -294,7 +300,7 @@ async fn agent_main_loop(
                             let tool_request = ChatRequest {
                                 model: config.llm.primary.model.clone(),
                                 system_prompt: full_prompt.clone(),
-                                messages: messages.clone(),
+                                messages: thread_msgs.clone(),
                                 tools: vec![],
                             };
 
@@ -311,6 +317,15 @@ async fn agent_main_loop(
                                 }
                             }
                         }
+
+                        // Save to thread history
+                        let history = thread_histories.entry(msg.thread_id.clone()).or_default();
+                        history.push(user_msg.clone());
+                        history.push(ChatMessage {
+                            role: "assistant".into(),
+                            content: response.content.clone(),
+                        });
+                        if history.len() > 40 { let excess = history.len() - 40; history.drain(0..excess); }
 
                         tracing::info!(
                             "Agent {} final response ({} tokens): {}",
@@ -382,6 +397,15 @@ async fn agent_main_loop(
                             match llm_gateway.chat(fallback, &fb_request).await {
                                 Ok(resp) => {
                                     retry_count = 0;  // Reset on success
+                                    // Save fallback response to thread history
+                                    let history = thread_histories.entry(msg.thread_id.clone()).or_default();
+                                    history.push(user_msg.clone());
+                                    history.push(ChatMessage {
+                                        role: "assistant".into(),
+                                        content: resp.content.clone(),
+                                    });
+                                    if history.len() > 40 { let excess = history.len() - 40; history.drain(0..excess); }
+
                                     tracing::info!(
                                         "Agent {} fallback response: {}",
                                         config.name,
