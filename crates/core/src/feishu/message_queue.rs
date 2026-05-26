@@ -1,7 +1,8 @@
 use std::collections::VecDeque;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
-use tokio::sync::Mutex;
+use tokio::sync::Mutex as TokioMutex;
+use super::bridge::FeishuBridge;
 use super::types::OutgoingMessage;
 
 #[derive(Debug)]
@@ -13,12 +14,12 @@ pub struct SendQueueEntry {
 
 #[derive(Clone)]
 pub struct SendQueue {
-    queue: Arc<Mutex<VecDeque<SendQueueEntry>>>,
+    queue: Arc<TokioMutex<VecDeque<SendQueueEntry>>>,
 }
 
 impl SendQueue {
     pub fn new() -> Self {
-        Self { queue: Arc::new(Mutex::new(VecDeque::new())) }
+        Self { queue: Arc::new(TokioMutex::new(VecDeque::new())) }
     }
 
     pub async fn enqueue(&self, message: OutgoingMessage, agent_id: String) {
@@ -41,17 +42,34 @@ impl SendQueue {
     }
 
     /// Start a background task that consumes from the queue at max 5 QPS
-    pub fn start_consumer(queue: Arc<SendQueue>) -> tokio::task::JoinHandle<()> {
+    pub fn start_consumer(
+        queue: Arc<SendQueue>,
+        bridge: Arc<Mutex<Option<FeishuBridge>>>,
+    ) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_millis(200)).await; // 5 QPS max
 
                 if let Some(entry) = queue.dequeue().await {
                     tracing::info!(
-                        "[SendQueue] Sending message via lark-cli: {}",
-                        &entry.message.text[..entry.message.text.len().min(60)]
+                        "[SendQueue] Sending: {}",
+                        &entry.message.text[..entry.message.text.len().min(60)],
                     );
-                    // Phase 3 V3: actual send via FeishuBridge.send_message()
+
+                    // Try to send via bridge (clone to drop MutexGuard before await)
+                    let bridge_opt = bridge.lock().unwrap().clone();
+                    if let Some(bridge) = bridge_opt {
+                        match bridge.send_message(&entry.message).await {
+                            Ok(msg_id) => {
+                                tracing::info!("[SendQueue] Sent: message_id={msg_id}");
+                            }
+                            Err(e) => {
+                                tracing::error!("[SendQueue] Send failed: {e}");
+                            }
+                        }
+                    } else {
+                        tracing::warn!("[SendQueue] FeishuBridge not available");
+                    }
                 }
             }
         })

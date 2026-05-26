@@ -23,6 +23,8 @@ pub struct AssistantAgent {
     pub active_tasks: Vec<TaskTracking>,
     /// Number of conversations processed since last summary LLM call
     pub pending_conversation_count: u32,
+    /// Assistant responses queued for the scheduler to send via Feishu
+    pub pending_responses: Vec<String>,
 }
 
 impl AssistantAgent {
@@ -34,12 +36,18 @@ impl AssistantAgent {
             conversation_log: Vec::new(),
             active_tasks: Vec::new(),
             pending_conversation_count: 0,
+            pending_responses: Vec::new(),
         }
     }
 
     /// Returns true if there are unsummarized conversations worth a summary LLM call
     pub fn has_pending_summaries(&self) -> bool {
         self.pending_conversation_count >= 3
+    }
+
+    /// Get and clear all pending assistant responses (for scheduler to send via Feishu)
+    pub fn drain_responses(&mut self) -> Vec<String> {
+        self.pending_responses.drain(..).collect()
     }
 
     pub fn default_role() -> &'static str {
@@ -173,7 +181,8 @@ actions 中的每条指令必须包含 type 字段：
                     );
                 }
                 AssistantAction::Respond { message: resp_msg } => {
-                    tracing::info!("[Assistant] Responding to user: {resp_msg}");
+                    tracing::info!("[Assistant] Response queued: {resp_msg}");
+                    self.pending_responses.push(resp_msg.clone());
                 }
             }
         }
