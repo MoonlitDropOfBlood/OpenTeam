@@ -462,6 +462,7 @@ dependencies = [
  "chrono",
  "json_rpc",
  "notify",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

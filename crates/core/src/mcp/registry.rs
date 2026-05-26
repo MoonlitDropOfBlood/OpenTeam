@@ -30,12 +30,13 @@ impl McpRegistry {
         Ok(registry)
     }
 
-    /// Get all tool definitions for all discovered MCP servers
+    /// Get all tool definitions — built-in tools + all discovered MCP servers
     pub fn get_all_tools(&self) -> Vec<ToolDefinition> {
-        self.servers
-            .values()
-            .flat_map(|s| s.tools.clone())
-            .collect()
+        let mut tools = super::builtin::builtin_tool_definitions();
+        for server in self.servers.values() {
+            tools.extend(server.tools.clone());
+        }
+        tools
     }
 
     /// Get tool definitions for specific named MCP servers
@@ -181,7 +182,15 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(json.as_bytes()).unwrap();
         let registry = McpRegistry::discover_all(&[path]).unwrap();
-        assert_eq!(registry.get_all_tools().len(), 2);
+        // 7 built-in + 2 from MCP config = 9 total
+        let all_tools = registry.get_all_tools();
+        assert_eq!(all_tools.len(), 9);
+        // Verify built-in tools are present
+        let tool_names: Vec<&str> = all_tools.iter().map(|t| t.name.as_str()).collect();
+        assert!(tool_names.contains(&"read_file"));
+        assert!(tool_names.contains(&"write_file"));
+        assert!(tool_names.contains(&"create_issue"));
+        assert!(tool_names.contains(&"search_code"));
         let _ = std::fs::remove_dir_all(&tmp);
     }
 }

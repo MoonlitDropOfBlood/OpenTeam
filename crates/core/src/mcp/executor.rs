@@ -4,15 +4,21 @@ use crate::llm::gateway::ToolCall;
 use crate::CoreError;
 use super::config::McpServerConfig;
 
-/// Execute an MCP tool call by spawning the corresponding server process.
+/// Execute a tool call. Checks built-in tools first, then external MCP servers.
 ///
-/// Sends a JSON-RPC `tools/call` request via stdin and reads the result from stdout.
-/// Uses a 30-second timeout to prevent stalled processes from blocking the agent loop.
+/// Built-in tools run in-process (no subprocess). External tools are executed
+/// via MCP server subprocesses using JSON-RPC `tools/call` with 30-second timeout.
 pub async fn execute_tool(
     tool_call: &ToolCall,
     server_name: &str,
     servers: &HashMap<String, McpServerConfig>,
 ) -> Result<String, CoreError> {
+    // Check if this is a built-in tool (runs in-process, no subprocess)
+    if super::builtin::is_builtin(&tool_call.name) {
+        return super::builtin::execute_builtin(&tool_call.name, &tool_call.arguments).await;
+    }
+
+    // Otherwise, route to external MCP server
     let server = servers
         .get(server_name)
         .ok_or_else(|| CoreError::Mcp(format!("Unknown MCP server: {server_name}")))?;
