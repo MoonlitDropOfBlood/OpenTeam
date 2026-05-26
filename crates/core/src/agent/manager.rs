@@ -220,8 +220,7 @@ async fn agent_main_loop(
                     thread_msgs.extend(history.clone());
                 }
                 // Add current message
-                thread_msgs.push(ChatMessage {
-                    role: "user".into(),
+                thread_msgs.push(ChatMessage { reasoning_content: None, role: "user".into(),
                     content: msg.content.clone(),
                 });
 
@@ -233,8 +232,7 @@ async fn agent_main_loop(
                 };
 
                 // Track user message for thread history
-                let user_msg = ChatMessage {
-                    role: "user".into(),
+                let user_msg = ChatMessage { reasoning_content: None, role: "user".into(),
                     content: msg.content.clone(),
                 };
 
@@ -265,8 +263,7 @@ async fn agent_main_loop(
                                 }));
                             }
 
-                            thread_msgs.push(ChatMessage {
-                                role: "assistant".into(),
+                            thread_msgs.push(ChatMessage { reasoning_content: None, role: "assistant".into(),
                                 content: serde_json::to_string(&assistant_content)
                                     .unwrap_or_default(),
                             });
@@ -289,8 +286,7 @@ async fn agent_main_loop(
                                     "content": result,
                                 }]);
 
-thread_msgs.push(ChatMessage {
-                                    role: "user".into(),
+thread_msgs.push(ChatMessage { reasoning_content: None, role: "user".into(),
                                     content: serde_json::to_string(&tool_result_content)
                                         .unwrap_or_default(),
                                 });
@@ -321,9 +317,9 @@ thread_msgs.push(ChatMessage {
                         // Save to thread history
                         let history = thread_histories.entry(msg.thread_id.clone()).or_default();
                         history.push(user_msg.clone());
-                        history.push(ChatMessage {
-                            role: "assistant".into(),
+                        history.push(ChatMessage { role: "assistant".into(),
                             content: response.content.clone(),
+                            reasoning_content: response.reasoning_content.clone(),
                         });
                         // Smart compression: estimate token count and compress when approaching limit
                         let max_context = config.llm.primary.max_tokens as f64 * 0.8; // 80% of max
@@ -339,8 +335,7 @@ thread_msgs.push(ChatMessage {
                                     .map(|m| format!("{}: {}", m.role, &m.content[..m.content.len().min(100)])).collect();
                                 let summary = format!("[Earlier conversation: {} turns compressed]", compress_count / 2);
                                 tracing::info!("Agent {} compressed {} history turns (est. {} tokens)", config.name, compress_count, estimated_tokens);
-                                history.insert(0, ChatMessage {
-                                    role: "system".into(),
+                                history.insert(0, ChatMessage { reasoning_content: None, role: "system".into(),
                                     content: summary,
                                 });
                             }
@@ -406,8 +401,7 @@ thread_msgs.push(ChatMessage {
                                 model: fallback.model.clone(),
                                 system_prompt: base_prompt.clone(),
                                 messages: vec![
-                                    ChatMessage {
-                                        role: "user".into(),
+                                    ChatMessage { reasoning_content: None, role: "user".into(),
                                         content: msg.content.clone(),
                                     },
                                 ],
@@ -419,9 +413,9 @@ thread_msgs.push(ChatMessage {
                                     // Save fallback response to thread history
                                     let history = thread_histories.entry(msg.thread_id.clone()).or_default();
                                     history.push(user_msg.clone());
-                                    history.push(ChatMessage {
-                                        role: "assistant".into(),
+                                    history.push(ChatMessage { role: "assistant".into(),
                                         content: resp.content.clone(),
+                                        reasoning_content: resp.reasoning_content.clone(),
                                     });
                                     // Smart compression: estimate token count and compress when approaching limit
                         let max_context = config.llm.primary.max_tokens as f64 * 0.8; // 80% of max
@@ -437,8 +431,7 @@ thread_msgs.push(ChatMessage {
                                     .map(|m| format!("{}: {}", m.role, &m.content[..m.content.len().min(100)])).collect();
                                 let summary = format!("[Earlier conversation: {} turns compressed]", compress_count / 2);
                                 tracing::info!("Agent {} compressed {} history turns (est. {} tokens)", config.name, compress_count, estimated_tokens);
-                                history.insert(0, ChatMessage {
-                                    role: "system".into(),
+                                history.insert(0, ChatMessage { reasoning_content: None, role: "system".into(),
                                     content: summary,
                                 });
                             }

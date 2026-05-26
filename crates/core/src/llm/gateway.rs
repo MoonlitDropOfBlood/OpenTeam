@@ -24,6 +24,18 @@ pub struct ChatRequest {
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_content: Option<String>,
+}
+
+impl ChatMessage {
+    pub fn new(role: impl Into<String>, content: impl Into<String>) -> Self {
+        Self {
+            role: role.into(),
+            content: content.into(),
+            reasoning_content: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -45,6 +57,7 @@ pub struct ChatResponse {
     pub content: String,
     pub tool_calls: Vec<ToolCall>,
     pub usage: TokenUsage,
+    pub reasoning_content: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -194,6 +207,7 @@ impl LlmGateway {
         Ok(ChatResponse {
             content: text_content,
             tool_calls,
+            reasoning_content: None,
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
@@ -236,6 +250,7 @@ impl LlmGateway {
         Ok(ChatResponse {
             content,
             tool_calls: vec![],
+            reasoning_content: None,
             usage: TokenUsage {
                 input_tokens: 0,
                 output_tokens: 0,
@@ -286,12 +301,17 @@ impl LlmGateway {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
-        // DeepSeek V4 enables "thinking" mode by default, which returns
-        // reasoning_content in responses. Our stateless gateway does not
-        // round-trip reasoning_content, causing 400 errors on multi-turn
-        // conversations with tool calls. Disable it explicitly.
-        if config.provider == "deepseek" {
-            body["thinking"] = serde_json::json!({"type": "disabled"});
+        // Preserve reasoning_content from previous turns (DeepSeek thinking mode)
+        for msg in &request.messages {
+            if let Some(ref rc) = msg.reasoning_content {
+                if let Some(arr) = body["messages"].as_array_mut() {
+                    for m in arr.iter_mut() {
+                        if m["role"] == "assistant" && m["content"] == msg.content {
+                            m["reasoning_content"] = serde_json::json!(rc);
+                        }
+                    }
+                }
+            }
         }
 
         // Determine API base URL based on provider
@@ -343,6 +363,7 @@ impl LlmGateway {
         Ok(ChatResponse {
             content,
             tool_calls,
+            reasoning_content: message["reasoning_content"].as_str().map(|s| s.to_string()),
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,

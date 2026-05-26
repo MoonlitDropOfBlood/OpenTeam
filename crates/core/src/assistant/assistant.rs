@@ -115,8 +115,7 @@ Each action in the actions array must have a type field:
         model_config: &ModelConfig,
     ) -> Result<Vec<AssistantAction>, CoreError> {
         // Build LLM messages before updating the conversation log
-        let mut messages = vec![ChatMessage {
-            role: "user".into(),
+        let mut messages = vec![ChatMessage { reasoning_content: None, role: "user".into(),
             content: format!(
                 "Current time policy: {:?}\n\nMessage from {}: {}",
                 self.current_mode, sender, message
@@ -139,16 +138,14 @@ Each action in the actions array must have a type field:
         let response = llm_gateway.chat(model_config, &request).await?;
 
         // Add message + response to conversation log AFTER LLM call
-        self.conversation_log.push(ChatMessage {
-            role: if sender == "user" {
+        self.conversation_log.push(ChatMessage { reasoning_content: None, role: if sender == "user" {
                 "user".into()
             } else {
                 "assistant".into()
             },
             content: message.into(),
         });
-        self.conversation_log.push(ChatMessage {
-            role: "assistant".into(),
+        self.conversation_log.push(ChatMessage { reasoning_content: None, role: "assistant".into(),
             content: response.content.clone(),
         });
 
