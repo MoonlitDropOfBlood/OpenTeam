@@ -18,25 +18,33 @@ impl McpRegistry {
         }
     }
 
-    /// Load MCP configs from mcp.json files and probe each server for tools
-    pub async fn discover_all(config_paths: &[PathBuf]) -> Result<Self, CoreError> {
+    /// Load MCP configs from mcp.json files (sync, no probing)
+    pub fn discover_all(config_paths: &[PathBuf]) -> Result<Self, CoreError> {
         let mut registry = Self::new();
         for path in config_paths {
             let configs = load_mcp_configs(path)?;
-            for mut cfg in configs {
-                // Probe this server for tools via tools/list JSON-RPC
-                match probe_server_tools(&cfg).await {
-                    Ok(tools) => {
-                        cfg.tools = tools;
-                    }
-                    Err(e) => {
-                        tracing::warn!("Failed to probe MCP server '{}': {e}", cfg.name);
-                    }
-                }
+            for cfg in configs {
                 registry.servers.insert(cfg.name.clone(), cfg);
             }
         }
         Ok(registry)
+    }
+
+    /// Probe all servers for their tool lists (async, spawns processes / HTTP calls)
+    pub async fn probe_all(&mut self) {
+        let names: Vec<String> = self.servers.keys().cloned().collect();
+        for name in names {
+            if let Some(server) = self.servers.get_mut(&name) {
+                match probe_server_tools(server).await {
+                    Ok(tools) => {
+                        server.tools = tools;
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to probe MCP server '{}': {e}", name);
+                    }
+                }
+            }
+        }
     }
 
     /// Get all tool definitions — built-in tools + all discovered MCP servers
@@ -202,9 +210,8 @@ mod tests {
         let mut f2 = std::fs::File::create(&p2).unwrap();
         f2.write_all(json2.as_bytes()).unwrap();
 
-        // discover_all is async — run via tokio runtime
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let registry = rt.block_on(McpRegistry::discover_all(&[p1, p2])).unwrap();
+        // discover_all is now sync (no probing)
+        let registry = McpRegistry::discover_all(&[p1, p2]).unwrap();
         assert_eq!(registry.list_servers().len(), 2);
 
         let _ = std::fs::remove_dir_all(&tmp1);
@@ -228,8 +235,7 @@ mod tests {
         let mut f = std::fs::File::create(&path).unwrap();
         f.write_all(json.as_bytes()).unwrap();
 
-        let rt = tokio::runtime::Runtime::new().unwrap();
-        let registry = rt.block_on(McpRegistry::discover_all(&[path])).unwrap();
+        let registry = McpRegistry::discover_all(&[path]).unwrap();
         // 8 built-in + 0 probed (no real server) = 8 total
         let all_tools = registry.get_all_tools();
         assert_eq!(all_tools.len(), 8);

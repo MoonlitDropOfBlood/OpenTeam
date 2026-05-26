@@ -106,9 +106,11 @@ impl Core {
                 mcp_paths.push(agent_mcp_path);
             }
         }
-        let mcp_registry = Arc::new(RwLock::new(
-            mcp::registry::McpRegistry::discover_all(&mcp_paths).await?
-        ));
+        let mut mcp_registry =
+            mcp::registry::McpRegistry::discover_all(&mcp_paths)?;
+        // Probe servers for tools
+        mcp_registry.probe_all().await;
+        let mcp_registry = Arc::new(RwLock::new(mcp_registry));
 
         Ok(Self {
             registry,
