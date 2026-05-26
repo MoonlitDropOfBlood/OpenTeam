@@ -26,6 +26,12 @@ pub struct ModelConfig {
     pub fallback: Option<String>,
     pub timeout_secs: Option<u64>,
     pub rate_limit: Option<RateLimitConfig>,
+    /// Custom base URL for OpenAI-compatible API. Default per provider:
+    /// anthropic: https://api.anthropic.com/v1/messages
+    /// deepseek:  https://api.deepseek.com/v1/chat/completions
+    /// openai:    https://api.openai.com/v1/chat/completions
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

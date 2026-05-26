@@ -106,7 +106,7 @@ impl LlmGateway {
         match model_config.provider.as_str() {
             "anthropic" => self.call_anthropic(model_config, request).await,
             "ollama" => self.call_ollama(model_config, request).await,
-            "deepseek" => self.call_openai(model_config, request).await,
+            "deepseek" | "openai" => self.call_openai_compat(model_config, request).await,
             provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
         }
     }
@@ -258,20 +258,24 @@ impl LlmGateway {
         })
     }
 
-    async fn call_openai(
-        &self,
-        config: &ModelConfig,
-        request: &ChatRequest,
-    ) -> Result<ChatResponse, CoreError> {
-        let api_key = std::env::var(
-            config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY"),
-        )
-        .map_err(|_| CoreError::Llm(format!(
-            "{} not set",
-            config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY"),
-        )))?;
+/// Generic OpenAI-compatible API caller. Supports any provider with a compatible endpoint.
+async fn call_openai_compat(
+    &self,
+    config: &ModelConfig,
+    request: &ChatRequest,
+) -> Result<ChatResponse, CoreError> {
+    let api_key_env = config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
+    let api_key = std::env::var(api_key_env)
+        .map_err(|_| CoreError::Llm(format!("{} not set", api_key_env)))?;
 
-        // Build messages array with system prompt
+    // Resolve API endpoint: base_url from config, or default per provider
+    let api_endpoint = config.base_url.clone().unwrap_or_else(|| {
+        match config.provider.as_str() {
+            "deepseek" => "https://api.deepseek.com/v1/chat/completions".to_string(),
+            "openai" => "https://api.openai.com/v1/chat/completions".to_string(),
+            _ => "https://api.openai.com/v1/chat/completions".to_string(), // generic fallback
+        }
+    });
         let mut all_messages: Vec<serde_json::Value> = vec![
             serde_json::json!({"role": "system", "content": request.system_prompt}),
         ];
@@ -314,21 +318,11 @@ impl LlmGateway {
             }
         }
 
-        // Determine API base URL based on provider
-        let api_base = match config.provider.as_str() {
-            "deepseek" => "https://api.deepseek.com/v1/chat/completions",
-            provider => {
-                return Err(CoreError::Llm(format!(
-                    "Unknown OpenAI-compatible provider: {provider}"
-                )))
-            }
-        };
-
         let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
         let response = tokio::time::timeout(
             timeout,
             self.client
-                .post(api_base)
+                .post(&api_endpoint)
                 .header("Authorization", format!("Bearer {}", api_key))
                 .json(&body)
                 .send(),
