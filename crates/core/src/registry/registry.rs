@@ -68,4 +68,14 @@ impl AgentRegistry {
     pub fn all(&self) -> Vec<&AgentRecord> {
         self.agents.values().collect()
     }
+
+    /// Remove an agent from the registry by ID. Returns the removed record.
+    pub fn remove(&mut self, id: &AgentId) -> Option<AgentRecord> {
+        self.agents.remove(id)
+    }
+
+    /// Find an agent by name
+    pub fn find_by_name(&self, name: &str) -> Option<&AgentRecord> {
+        self.agents.values().find(|r| r.config.name == name)
+    }
 }
