@@ -184,10 +184,10 @@ async fn agent_main_loop(
                         base_prompt.clone()
                     } else {
                         let mut prompt = base_prompt.clone();
-                        prompt.push_str("\n\n## 相关记忆\n");
+                        prompt.push_str("\n\n## Related Memories\n");
                         for (i, mem) in memories.iter().enumerate() {
                             prompt.push_str(&format!(
-                                "{}. {} (重要性: {}, 相似度: {:.2})\n   {}\n",
+                                "{}. {} (importance: {}, similarity: {:.2})\n   {}\n",
                                 i + 1,
                                 mem.entry.title,
                                 mem.entry.importance,

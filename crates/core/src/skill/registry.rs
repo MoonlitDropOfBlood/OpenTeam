@@ -120,8 +120,8 @@ impl SkillRegistry {
 
         let all_skills: Vec<&SkillDef> = self.skills.values().collect();
         if !all_skills.is_empty() {
-            prompt.push_str("## 可用技能\n\n");
-            prompt.push_str("你有以下技能可用，根据需求选择合适的技能，严格按照技能说明执行。\n\n");
+prompt.push_str("## Available Skills\n\n");
+        prompt.push_str("You have the following skills available. Choose the right skill based on the task and follow its instructions carefully.\n\n");
 
             for skill in &all_skills {
                 prompt.push_str(&format!("### {}\n", skill.name));
@@ -286,8 +286,8 @@ Create Feishu documents."#;
         f.write_all(content.as_bytes()).unwrap();
 
         let registry = SkillRegistry::discover(&tmp).unwrap();
-        let prompt = registry.build_system_prompt("你是产品经理");
-        assert!(prompt.contains("你是产品经理"));
+        let prompt = registry.build_system_prompt("You are a product manager");
+        assert!(prompt.contains("You are a product manager"));
         assert!(prompt.contains("feishu-doc"));
         assert!(prompt.contains("Create Feishu documents"));
 

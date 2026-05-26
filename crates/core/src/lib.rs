@@ -294,7 +294,7 @@ impl Core {
                             count,
                         );
                         let _summary_prompt = format!(
-                            "请汇总过去这段时间的工作进展。有 {} 条未处理的对话需要总结。按以下格式输出：\n\n1. 完成的任务\n2. 进行中的任务\n3. 阻塞的问题\n4. 待办事项",
+                            "Summarize the work progress for the past period. There are {} unprocessed conversations to summarize. Output in the following format:\n\n1. Completed tasks\n2. In-progress tasks\n3. Blocked issues\n4. Action items",
                             count,
                         );
                         // Phase 3 V3: call assistant.process_message() with summary prompt
