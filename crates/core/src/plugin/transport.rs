@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, Command};
 use tokio::sync::Mutex;
 
@@ -70,14 +71,49 @@ impl PluginHost {
     }
 }
 
-/// Send a JSON-RPC request via stdin/stdout to the Node.js host
-/// Phase 3 V2: actual IPC with PluginHost — currently returns stub
-pub async fn send_request(request: &JsonRpcRequest) -> Result<JsonRpcResponse, String> {
+/// Send a JSON-RPC request to the Node.js host and await response
+/// Real IPC: writes JSON-RPC request to child stdin, reads response from child stdout
+pub async fn send_request_to_host(
+    request: &JsonRpcRequest,
+    child_opt: &Arc<Mutex<Option<Child>>>,
+) -> Result<JsonRpcResponse, String> {
+    let request_str = serde_json::to_string(request)
+        .map_err(|e| format!("Serialize: {e}"))?;
+
+    let mut guard = child_opt.lock().await;
+    let child = guard.as_mut().ok_or("Plugin host not running")?;
+
+    // Write request to stdin
+    if let Some(stdin) = child.stdin.as_mut() {
+        stdin.write_all(request_str.as_bytes()).await
+            .map_err(|e| format!("Write stdin: {e}"))?;
+        stdin.write_all(b"\n").await.ok();
+    }
+
+    // Read response from stdout
+    let stdout = child.stdout.as_mut()
+        .ok_or("No stdout from plugin host")?;
+    let mut reader = BufReader::new(stdout);
+    let mut line = String::new();
+
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        reader.read_line(&mut line),
+    )
+    .await
+    .map_err(|_| "Plugin host timed out".to_string())?
+    .map_err(|e| format!("Read stdout: {e}"))?;
+
+    serde_json::from_str(&line)
+        .map_err(|e| format!("Parse response: {e}\nRaw: {line}"))
+}
+
+/// Send a JSON-RPC request via stdin/stdout to the Node.js host (stub)
+/// Phase 3 V2: actual IPC with PluginHost — use send_request_to_host for real communication
+pub async fn send_request_stub(request: &JsonRpcRequest) -> Result<JsonRpcResponse, String> {
     let input = serde_json::to_string(request)
         .map_err(|e| format!("Serialize request: {e}"))?;
-    tracing::debug!("Plugin IPC request: {input}");
-    // Phase 3 V2: write to child stdin, read from child stdout
-    // For now, return stub response
+    tracing::debug!("Plugin IPC request (stub): {input}");
     Ok(JsonRpcResponse {
         jsonrpc: "2.0".into(),
         id: request.id,
@@ -106,7 +142,7 @@ mod tests {
         assert_eq!(parsed.method, "ping");
 
         // Verify stub response
-        let resp = send_request(&req).await.unwrap();
+        let resp = send_request_stub(&req).await.unwrap();
         assert_eq!(resp.id, 42);
         assert!(resp.error.is_none());
         assert!(resp.result.is_some());

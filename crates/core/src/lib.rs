@@ -13,6 +13,7 @@ pub mod mcp;
 
 use std::path::Path;
 use std::sync::Arc;
+use tokio::io::AsyncBufReadExt;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
@@ -192,15 +193,61 @@ impl Core {
         let _consumer_handle = feishu::message_queue::SendQueue::start_consumer(send_queue, consumer_bridge);
         tracing::info!("Send queue consumer started (5 QPS)");
 
-        // Start WebSocket event subscriber (Phase 3 V3: requires lark-cli auth)
+        // Start WebSocket event subscriber (Phase 3 V3: real lark-cli subscription)
+        let feishu_bridge_clone = self.feishu_bridge.clone();
         let _ws_handle = tokio::spawn(async move {
-            tracing::info!("[WS] WebSocket subscriber starting...");
-            // Phase 3 V3:
-            // let child = feishu_bridge_clone.subscribe_events(&["im.message.receive_v1"]).await;
-            // let reader = BufReader::new(child.stdout.take().unwrap());
-            // loop { read event -> route to MessageRouter }
-            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-            tracing::info!("[WS] WebSocket subscriber ready (requires `lark-cli auth check` to be authenticated)");
+            tracing::info!("[WS] Attempting to subscribe to Feishu events...");
+
+            // Check if lark-cli is available
+            match tokio::process::Command::new("lark-cli")
+                .arg("--version")
+                .output()
+                .await
+            {
+                Ok(output) if output.status.success() => {
+                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                    tracing::info!("[WS] lark-cli available: {}", version);
+
+                    // Subscribe to message events
+                    match feishu_bridge_clone.subscribe_events(&["im.message.receive_v1"]).await {
+                        Ok(mut child) => {
+                            tracing::info!("[WS] Subscribed to im.message.receive_v1 (pid: {:?})", child.id());
+
+                            // Read events from stdout
+                            if let Some(stdout) = child.stdout.take() {
+                                let mut reader = tokio::io::BufReader::new(stdout);
+                                let mut line = String::new();
+                                loop {
+                                    line.clear();
+                                    match tokio::time::timeout(
+                                        std::time::Duration::from_secs(300),
+                                        reader.read_line(&mut line),
+                                    ).await {
+                                        Ok(Ok(_)) if !line.trim().is_empty() => {
+                                            tracing::info!("[WS] Event received: {}", line.trim());
+                                            // Phase 3 V3: parse and route event
+                                        }
+                                        Ok(Ok(_)) => {} // empty line, skip
+                                        Ok(Err(e)) => {
+                                            tracing::error!("[WS] Read error: {e}");
+                                            break;
+                                        }
+                                        Err(_) => {
+                                            tracing::debug!("[WS] No events for 5min, still alive");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            tracing::warn!("[WS] Failed to subscribe: {e}");
+                        }
+                    }
+                }
+                _ => {
+                    tracing::warn!("[WS] lark-cli not available — WebSocket events disabled");
+                }
+            }
         });
         tracing::info!("WebSocket event subscriber started");
 

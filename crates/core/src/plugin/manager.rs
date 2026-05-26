@@ -53,6 +53,18 @@ impl PluginManager {
         *running = true;
         tracing::info!("Plugin system started");
 
+        // Phase 3 V3: spawn Node.js host
+        let host_path = std::env::current_dir()
+            .map(|p| p.join("plugins/host/src/index.js"))
+            .unwrap_or_else(|_| std::path::PathBuf::from("plugins/host/src/index.js"));
+
+        if host_path.exists() {
+            tracing::info!("Plugin host script found at {:?}", host_path);
+            // Actual spawning is done by PluginHost when needed
+        } else {
+            tracing::warn!("Plugin host script not found at {:?}", host_path);
+        }
+
         // Trigger startup hook
         self.trigger_hook("system:startup", &serde_json::json!({
             "timestamp": std::time::SystemTime::now()
