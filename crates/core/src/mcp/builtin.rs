@@ -5,14 +5,20 @@ use crate::feishu::types::{MessagePriority, OutgoingMessage};
 use crate::CoreError;
 use super::config::ToolDefinition;
 
-/// Global static to hold the FeishuBridge for use by send_feishu_message tool
-static FEISHU_SENDER: OnceLock<tokio::sync::Mutex<Option<FeishuBridge>>> = OnceLock::new();
+/// Configuration for Feishu integration (bridge + chat_id)
+pub struct FeishuConfig {
+    pub bridge: FeishuBridge,
+    pub chat_id: String,
+}
 
-/// Register the FeishuBridge for use by the send_feishu_message tool
-pub fn register_feishu_bridge(bridge: FeishuBridge) {
+/// Global static to hold the FeishuConfig for use by send_feishu_message tool
+static FEISHU_SENDER: OnceLock<tokio::sync::Mutex<Option<FeishuConfig>>> = OnceLock::new();
+
+/// Register the FeishuBridge with chat_id for use by the send_feishu_message tool
+pub fn register_feishu_bridge(bridge: FeishuBridge, chat_id: String) {
     let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
-    *lock.blocking_lock() = Some(bridge);
-    tracing::info!("[builtin] FeishuBridge registered for send_feishu_message tool");
+    *lock.blocking_lock() = Some(FeishuConfig { bridge, chat_id });
+    tracing::info!("[builtin] FeishuBridge registered with chat_id for send_feishu_message tool");
 }
 
 /// Returns the list of built-in tool definitions (always available to all agents)
@@ -333,19 +339,18 @@ async fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> 
 
     let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
     let guard = lock.lock().await;
-    let bridge = guard.as_ref()
+    let config = guard.as_ref()
         .ok_or_else(|| CoreError::Mcp("FeishuBridge not initialized".into()))?;
 
-    // Phase 3 V3: chat_id should come from config. Use placeholder for now.
     let outgoing = OutgoingMessage {
-        chat_id: "placeholder_chat_id".into(),
+        chat_id: config.chat_id.clone(),
         thread_id: None,
         text: message.to_string(),
         mentions: vec![],
         priority: MessagePriority::Secretary,
     };
 
-    let msg_id = bridge.send_message(&outgoing).await
+    let msg_id = config.bridge.send_message(&outgoing).await
         .map_err(|e| CoreError::Mcp(format!("Feishu send failed: {e}")))?;
 
     tracing::info!("[send_feishu] Sent to Feishu: message_id={msg_id}");

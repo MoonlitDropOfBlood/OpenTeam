@@ -9,7 +9,7 @@ pub struct MessageRouter {
     agent_senders: HashMap<AgentId, mpsc::Sender<AgentCommand>>,
 }
 
-/// Check if a message matches any agent's trigger patterns
+/// Check if a message matches any agent's trigger patterns using regex
 pub fn find_matching_agents<'a>(
     content: &str,
     registry: &'a AgentRegistry,
@@ -17,12 +17,14 @@ pub fn find_matching_agents<'a>(
     let mut matched = Vec::new();
     for agent in registry.all() {
         for trigger in &agent.config.triggers {
-            // Simple substring match (Phase 3 V3: regex)
-            if content.contains(&trigger.pattern) {
-                matched.push(agent);
-                break;
+            // Use regex matching for trigger patterns
+            if let Ok(re) = regex::Regex::new(&trigger.pattern) {
+                if re.is_match(content) {
+                    matched.push(agent);
+                    break;
+                }
             }
-            // Also check @mention by agent name
+            // Also check @mention by agent name (always valid, no regex needed)
             if content.contains(&format!("@{}", agent.config.name)) {
                 if !matched.iter().any(|a| a.config.name == agent.config.name) {
                     matched.push(agent);

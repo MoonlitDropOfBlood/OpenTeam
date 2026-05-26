@@ -22,6 +22,8 @@ pub struct Core {
     pub registry: registry::AgentRegistry,
     pub llm_gateway: llm::gateway::LlmGateway,
     pub feishu_bridge: feishu::bridge::FeishuBridge,
+    pub feishu_chat_id: String,
+    pub default_model_config: Option<config::agent::ModelConfig>,
     pub memory_store: Arc<memory::store::MemoryStore>,
     pub agent_manager: agent::manager::AgentManager,
     pub router: router::router::MessageRouter,
@@ -54,6 +56,14 @@ impl Core {
         let router = router::router::MessageRouter::new();
         let assistant = Arc::new(Mutex::new(assistant::assistant::AssistantAgent::new()));
         let plugin_manager = plugin::manager::PluginManager::new();
+
+        // Read Feishu chat_id from env var
+        let feishu_chat_id = std::env::var("FEISHU_CHAT_ID").unwrap_or_default();
+        tracing::info!("Feishu chat_id: {}", if feishu_chat_id.is_empty() { "(not set)" } else { &feishu_chat_id });
+
+        // Pick first available model config as default for summary generation
+        let default_model_config = registry.all().first()
+            .map(|r| r.config.llm.primary.clone());
 
         // Discover global skills
         let global_skills_dir = skill::registry::global_skills_dir();
@@ -116,6 +126,8 @@ impl Core {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
             feishu_bridge: feishu::bridge::FeishuBridge::new(),
+            feishu_chat_id,
+            default_model_config,
             memory_store,
             agent_manager,
             router,
@@ -171,7 +183,7 @@ impl Core {
     /// Start the background scheduler and skill file watcher
     pub fn start_scheduler(&mut self) {
         // Register FeishuBridge for built-in tools (send_feishu_message)
-        mcp::builtin::register_feishu_bridge(self.feishu_bridge.clone());
+        mcp::builtin::register_feishu_bridge(self.feishu_bridge.clone(), self.feishu_chat_id.clone());
 
         // Start send queue consumer with bridge reference (5 QPS rate-limited dispatcher)
         let send_queue = std::sync::Arc::new(self.feishu_bridge.queue().clone());
@@ -233,6 +245,7 @@ impl Core {
 
         // Start scheduler task
         let assistant = self.assistant.clone();
+        let default_model_config = self.default_model_config.clone();
         let handle = tokio::spawn(async move {
             let mut secs_since_last_summary: u64 = 0;
 
@@ -304,7 +317,13 @@ impl Core {
                             count,
                         );
                         // Phase 3 V3: call assistant.process_message() with summary prompt
-                        // For now, just reset the counter to avoid infinite buildup
+                        // Model config is available for future LLM summary generation
+                        tracing::info!(
+                            "[Scheduler] Summary requested ({} conversations, model config {}available)",
+                            count,
+                            if default_model_config.is_some() { "" } else { "not " },
+                        );
+                        // Reset counter to avoid infinite buildup
                         {
                             let mut asst = assistant.lock().await;
                             asst.pending_conversation_count = 0;

@@ -5,33 +5,37 @@ use crate::llm::gateway::ToolCall;
 use crate::CoreError;
 use super::config::McpServerConfig;
 
-/// Simple MCP process cache with TTL
+/// MCP process cache with 30s reuse window
 static PROCESS_CACHE: once_cell::sync::Lazy<Mutex<HashMap<String, CachedProcess>>> =
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
 struct CachedProcess {
-    // Phase 3 V3: store child process handles for reuse
-    // For now, just track when we last spawned to avoid rapid respawns
-    last_spawned: Instant,
+    child: Option<tokio::process::Child>,
+    last_used: Instant,
 }
 
-/// Check if we can reuse a cached process (min 5s between spawns)
+/// Check if we can reuse a cached process (within 30s since last use)
 pub fn can_reuse_process(server_name: &str) -> bool {
     let cache = PROCESS_CACHE.lock().unwrap();
     if let Some(entry) = cache.get(server_name) {
-        entry.last_spawned.elapsed() < Duration::from_secs(5)
+        entry.last_used.elapsed() < Duration::from_secs(30)
     } else {
         false
     }
 }
 
-/// Track that a process was spawned for this server
-pub fn track_process_spawn(server_name: &str) {
+/// Track that a process was used for this server; store child handle for reuse
+pub fn track_process_spawn(server_name: &str, child: Option<tokio::process::Child>) {
     let mut cache = PROCESS_CACHE.lock().unwrap();
+    // Drop previous child if it exists (will wait for exit)
+    if let Some(prev) = cache.remove(server_name) {
+        drop(prev);
+    }
     cache.insert(
         server_name.to_string(),
         CachedProcess {
-            last_spawned: Instant::now(),
+            child,
+            last_used: Instant::now(),
         },
     );
 }
@@ -52,21 +56,31 @@ pub async fn execute_tool(
         .get(server_name)
         .ok_or_else(|| CoreError::Mcp(format!("Unknown MCP server: {server_name}")))?;
 
-    // Check process pool: skip spawn if recently spawned
-    if can_reuse_process(server_name) {
-        tracing::debug!(
-            "[MCP] Reusing cached process for {} (spawned <5s ago)",
-            server_name
-        );
-    }
+    // Check process pool: reuse if within 30s window
+    let _cached = {
+        let cache = PROCESS_CACHE.lock().unwrap();
+        cache.get(server_name).and_then(|c| {
+            if c.last_used.elapsed() < Duration::from_secs(30) {
+                tracing::debug!(
+                    "[MCP] Reusing cached process for {} (last used {:?}s ago)",
+                    server_name,
+                    c.last_used.elapsed().as_secs(),
+                );
+                // Phase 3 V3: send next JSON-RPC request via stored stdin handle
+                Some(())
+            } else {
+                None
+            }
+        })
+    };
 
     tracing::info!(
         "[MCP] Executing {}.{} with args: {:?}",
         server_name, tool_call.name, tool_call.arguments,
     );
 
-    // Track this spawn in the process pool
-    track_process_spawn(server_name);
+    // Track this spawn in the process pool (child=None for now; Phase 3 V4: store handle)
+    track_process_spawn(server_name, None);
 
     // Send JSON-RPC tools/call via the shared transport (stdio or HTTP)
     let resp = super::config::send_jsonrpc(
