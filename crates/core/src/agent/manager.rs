@@ -5,6 +5,7 @@ use tokio::sync::{mpsc, RwLock};
 use tokio_util::sync::CancellationToken;
 use crate::config::agent::AgentConfig;
 use crate::llm::gateway::{LlmGateway, ChatRequest, ChatMessage};
+use crate::mcp::config::McpServerConfig;
 use crate::registry::{AgentId, AgentRegistry};
 use crate::skill::registry::SkillRegistry;
 use crate::memory::store::MemoryStore;
@@ -169,7 +170,7 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                 // Build LLM request with enhanced prompt
                 let request = ChatRequest {
                     model: config.llm.primary.model.clone(),
-                    system_prompt: full_prompt,
+                    system_prompt: full_prompt.clone(),
                     messages: vec![
                         ChatMessage {
                             role: "user".into(),
@@ -179,9 +180,96 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                     tools: vec![],
                 };
 
+                // Collect messages for the conversation (may grow with tool calls)
+                let mut messages: Vec<ChatMessage> = vec![
+                    ChatMessage {
+                        role: "user".into(),
+                        content: msg.content.clone(),
+                    },
+                ];
+
                 match llm_gateway.chat(&config.llm.primary, &request).await {
-                    Ok(response) => {
-                        tracing::info!("Agent {} LLM response ({} tokens): {}",
+                    Ok(mut response) => {
+                        // Tool execution loop: if LLM wants to use tools, execute and feed back
+                        while !response.tool_calls.is_empty() {
+                            tracing::info!(
+                                "Agent {} executing {} tool(s)",
+                                config.name,
+                                response.tool_calls.len(),
+                            );
+
+                            // Build assistant message with text + tool_use content blocks
+                            let mut assistant_content: Vec<serde_json::Value> = Vec::new();
+                            if !response.content.is_empty() {
+                                assistant_content.push(serde_json::json!({
+                                    "type": "text",
+                                    "text": response.content,
+                                }));
+                            }
+                            for tc in &response.tool_calls {
+                                assistant_content.push(serde_json::json!({
+                                    "type": "tool_use",
+                                    "id": tc.id,
+                                    "name": tc.name,
+                                    "input": tc.arguments,
+                                }));
+                            }
+
+                            messages.push(ChatMessage {
+                                role: "assistant".into(),
+                                content: serde_json::to_string(&assistant_content)
+                                    .unwrap_or_default(),
+                            });
+
+                            // Execute each tool and build tool_result messages
+                            for tc in &response.tool_calls {
+                                // Phase 3 V3: integrate McpRegistry for server lookup.
+                                // For now, tool name doubles as server name.
+                                let result = crate::mcp::executor::execute_tool(
+                                    tc,
+                                    &tc.name,
+                                    &HashMap::<String, McpServerConfig>::new(),
+                                )
+                                .await
+                                .unwrap_or_else(|e| format!("Error: {e}"));
+
+                                let tool_result_content = serde_json::json!([{
+                                    "type": "tool_result",
+                                    "tool_use_id": tc.id,
+                                    "content": result,
+                                }]);
+
+                                messages.push(ChatMessage {
+                                    role: "user".into(),
+                                    content: serde_json::to_string(&tool_result_content)
+                                        .unwrap_or_default(),
+                                });
+                            }
+
+                            // Call LLM again with tool results (no tools needed this round)
+                            let tool_request = ChatRequest {
+                                model: config.llm.primary.model.clone(),
+                                system_prompt: full_prompt.clone(),
+                                messages: messages.clone(),
+                                tools: vec![],
+                            };
+
+                            match llm_gateway.chat(&config.llm.primary, &tool_request).await {
+                                Ok(next_resp) => {
+                                    response = next_resp;
+                                }
+                                Err(e) => {
+                                    tracing::error!(
+                                        "Agent {} LLM error during tool loop: {e}",
+                                        config.name,
+                                    );
+                                    break;
+                                }
+                            }
+                        }
+
+                        tracing::info!(
+                            "Agent {} final response ({} tokens): {}",
                             config.name,
                             response.usage.output_tokens,
                             &response.content[..response.content.len().min(100)],
@@ -193,7 +281,10 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                                 id: uuid::Uuid::now_v7(),
                                 agent_id: config.name.clone(),
                                 memory_type: MemoryType::ShortTerm,
-                                title: format!("Response to: {}", &msg.content[..msg.content.len().min(60)]),
+                                title: format!(
+                                    "Response to: {}",
+                                    &msg.content[..msg.content.len().min(60)],
+                                ),
                                 summary: response.content.clone(),
                                 decisions: vec![],
                                 artifacts: vec![],
@@ -201,8 +292,12 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                                 importance: 5,
                                 embedding: None,
                                 turn_indices: vec![],
-                                created_at: chrono::DateTime::<chrono::Utc>::from(SystemTime::now()),
-                                last_accessed: chrono::DateTime::<chrono::Utc>::from(SystemTime::now()),
+                                created_at: chrono::DateTime::<chrono::Utc>::from(
+                                    SystemTime::now(),
+                                ),
+                                last_accessed: chrono::DateTime::<chrono::Utc>::from(
+                                    SystemTime::now(),
+                                ),
                                 access_count: 0,
                             }).await;
                         }
@@ -210,7 +305,10 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                     Err(e) => {
                         // Try fallback model if primary fails
                         if let Some(ref fallback) = config.llm.fallback {
-                            tracing::warn!("Agent {} primary LLM failed, trying fallback: {e}", config.name);
+                            tracing::warn!(
+                                "Agent {} primary LLM failed, trying fallback: {e}",
+                                config.name,
+                            );
                             let fb_request = ChatRequest {
                                 model: fallback.model.clone(),
                                 system_prompt: base_prompt.clone(),
@@ -223,10 +321,15 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                                 tools: vec![],
                             };
                             match llm_gateway.chat(fallback, &fb_request).await {
-                                Ok(resp) => tracing::info!("Agent {} fallback response: {}",
+                                Ok(resp) => tracing::info!(
+                                    "Agent {} fallback response: {}",
                                     config.name,
-                                    &resp.content[..resp.content.len().min(100)]),
-                                Err(e2) => tracing::error!("Agent {} both LLMs failed: primary={e}, fallback={e2}", config.name),
+                                    &resp.content[..resp.content.len().min(100)],
+                                ),
+                                Err(e2) => tracing::error!(
+                                    "Agent {} both LLMs failed: primary={e}, fallback={e2}",
+                                    config.name,
+                                ),
                             }
                         } else {
                             tracing::error!("Agent {} LLM call failed: {e}", config.name);

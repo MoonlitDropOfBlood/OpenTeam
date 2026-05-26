@@ -107,14 +107,38 @@ impl LlmGateway {
         )
         .map_err(|_| CoreError::Llm("ANTHROPIC_API_KEY not set".into()))?;
 
-        let body = serde_json::json!({
+        // Build messages array — support both plain text and structured content blocks
+        let messages: Vec<serde_json::Value> = request.messages.iter().map(|m| {
+            match serde_json::from_str::<serde_json::Value>(&m.content) {
+                Ok(serde_json::Value::Array(_)) => {
+                    // Already structured content blocks (tool_result, tool_use)
+                    serde_json::json!({"role": m.role, "content": serde_json::from_str::<serde_json::Value>(&m.content).unwrap()})
+                }
+                _ => {
+                    // Plain text message
+                    serde_json::json!({"role": m.role, "content": m.content})
+                }
+            }
+        }).collect();
+
+        let mut body = serde_json::json!({
             "model": config.model,
             "max_tokens": config.max_tokens,
             "system": request.system_prompt,
-            "messages": request.messages.iter().map(|m| {
-                serde_json::json!({"role": m.role, "content": m.content})
-            }).collect::<Vec<_>>(),
+            "messages": messages,
         });
+
+        // Add tools if present
+        if !request.tools.is_empty() {
+            let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
+                serde_json::json!({
+                    "name": t.name,
+                    "description": t.description,
+                    "input_schema": t.input_schema,
+                })
+            }).collect();
+            body["tools"] = serde_json::json!(tools);
+        }
 
         let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
         let response = tokio::time::timeout(
@@ -131,16 +155,44 @@ impl LlmGateway {
 
         let json: serde_json::Value = response.json().await?;
 
-        let content = json["content"][0]["text"]
-            .as_str()
-            .unwrap_or("")
-            .to_string();
+        // Parse content blocks — extract text and tool_use
+        let mut text_content = String::new();
+        let mut tool_calls = Vec::new();
+
+        if let Some(content_blocks) = json["content"].as_array() {
+            for block in content_blocks {
+                match block["type"].as_str() {
+                    Some("text") => {
+                        if let Some(text) = block["text"].as_str() {
+                            text_content.push_str(text);
+                        }
+                    }
+                    Some("tool_use") => {
+                        tool_calls.push(ToolCall {
+                            id: block["id"].as_str().unwrap_or("").to_string(),
+                            name: block["name"].as_str().unwrap_or("").to_string(),
+                            arguments: block["input"].clone(),
+                        });
+                    }
+                    _ => {}
+                }
+            }
+        }
+
+        // Fallback for older API format or simple text responses
+        if text_content.is_empty() && tool_calls.is_empty() {
+            text_content = json["content"][0]["text"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+        }
+
         let input_tokens = json["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
         let output_tokens = json["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
 
         Ok(ChatResponse {
-            content,
-            tool_calls: vec![],
+            content: text_content,
+            tool_calls,
             usage: TokenUsage {
                 input_tokens,
                 output_tokens,
