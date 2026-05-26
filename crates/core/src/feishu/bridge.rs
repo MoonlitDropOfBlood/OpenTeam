@@ -6,6 +6,7 @@ use super::message_queue::SendQueue;
 use super::types::*;
 use crate::CoreError;
 
+#[derive(Clone)]
 pub struct FeishuBridge {
     queue: SendQueue,
 }
@@ -170,5 +171,12 @@ impl FeishuBridge {
             content: message["body"]["content"].as_str().unwrap_or("").to_string(),
             msg_type: message["msg_type"].as_str().unwrap_or("").to_string(),
         })
+    }
+
+    /// Send a message through the queue (respects 5 QPS)
+    pub async fn send_queued(&self, msg: OutgoingMessage, agent_id: &str) -> Result<MessageId, CoreError> {
+        self.queue.enqueue(msg, agent_id.to_string()).await;
+        // Return a placeholder ID — real ID comes after send
+        Ok("queued".into())
     }
 }

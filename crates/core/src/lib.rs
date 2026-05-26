@@ -155,6 +155,14 @@ impl Core {
 
     /// Start the background scheduler and skill file watcher
     pub fn start_scheduler(&mut self) {
+        // Register FeishuBridge for built-in tools (send_feishu_message)
+        mcp::builtin::register_feishu_bridge(self.feishu_bridge.clone());
+
+        // Start send queue consumer (5 QPS rate-limited dispatcher)
+        let send_queue = std::sync::Arc::new(self.feishu_bridge.queue().clone());
+        let _consumer_handle = feishu::message_queue::SendQueue::start_consumer(send_queue);
+        tracing::info!("Send queue consumer started (5 QPS)");
+
         // Start skill file watcher (needs multi-threaded runtime)
         let skill_registry = self.skill_registry.clone();
         let global_dir = skill::registry::global_skills_dir();

@@ -1,6 +1,19 @@
 use std::path::Path;
+use std::sync::OnceLock;
+use crate::feishu::bridge::FeishuBridge;
+use crate::feishu::types::{MessagePriority, OutgoingMessage};
 use crate::CoreError;
 use super::config::ToolDefinition;
+
+/// Global static to hold the FeishuBridge for use by send_feishu_message tool
+static FEISHU_SENDER: OnceLock<tokio::sync::Mutex<Option<FeishuBridge>>> = OnceLock::new();
+
+/// Register the FeishuBridge for use by the send_feishu_message tool
+pub fn register_feishu_bridge(bridge: FeishuBridge) {
+    let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
+    *lock.blocking_lock() = Some(bridge);
+    tracing::info!("[builtin] FeishuBridge registered for send_feishu_message tool");
+}
 
 /// Returns the list of built-in tool definitions (always available to all agents)
 pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
@@ -120,7 +133,7 @@ pub async fn execute_builtin(name: &str, args: &serde_json::Value) -> Result<Str
         "list_directory" => cmd_list_directory(args),
         "bash_exec" => cmd_bash_exec(args).await,
         "web_fetch" => cmd_web_fetch(args).await,
-        "send_feishu_message" => cmd_send_feishu(args),
+        "send_feishu_message" => cmd_send_feishu(args).await,
         _ => Err(CoreError::Mcp(format!("Unknown built-in tool: {name}"))),
     }
 }
@@ -314,9 +327,27 @@ async fn cmd_web_fetch(args: &serde_json::Value) -> Result<String, CoreError> {
     Ok(format!("HTTP {status}\n\n{preview}"))
 }
 
-fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> {
+async fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> {
     let message = args["message"].as_str()
         .ok_or_else(|| CoreError::Mcp("send_feishu_message requires 'message'".into()))?;
-    tracing::info!("[send_feishu] {message}");
-    Ok(format!("Message sent to Feishu: {message}"))
+
+    let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
+    let guard = lock.lock().await;
+    let bridge = guard.as_ref()
+        .ok_or_else(|| CoreError::Mcp("FeishuBridge not initialized".into()))?;
+
+    // Phase 3 V3: chat_id should come from config. Use placeholder for now.
+    let outgoing = OutgoingMessage {
+        chat_id: "placeholder_chat_id".into(),
+        thread_id: None,
+        text: message.to_string(),
+        mentions: vec![],
+        priority: MessagePriority::Secretary,
+    };
+
+    let msg_id = bridge.send_message(&outgoing).await
+        .map_err(|e| CoreError::Mcp(format!("Feishu send failed: {e}")))?;
+
+    tracing::info!("[send_feishu] Sent to Feishu: message_id={msg_id}");
+    Ok(format!("Message sent to Feishu (id: {msg_id})"))
 }
