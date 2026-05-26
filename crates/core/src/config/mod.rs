@@ -14,6 +14,11 @@ pub fn load_agent_config(path: &Path) -> Result<agent::AgentConfig, CoreError> {
     Ok(config)
 }
 
+/// Load an agent config from a single YAML file path (public alias)
+pub fn load_agent_config_from_path(path: &Path) -> Result<agent::AgentConfig, CoreError> {
+    load_agent_config(path)
+}
+
 /// Load LLM config from YAML file
 pub fn load_llm_config(path: &Path) -> Result<llm::LlmConfig, CoreError> {
     let content = std::fs::read_to_string(path)?;

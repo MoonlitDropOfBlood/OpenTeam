@@ -35,6 +35,7 @@ pub struct Core {
     scheduler_handle: Option<JoinHandle<()>>,
     watcher_handle: Option<JoinHandle<()>>,
     mcp_watcher_handle: Option<JoinHandle<()>>,
+    agent_watcher_handle: Option<JoinHandle<()>>,
 }
 
 impl Core {
@@ -139,6 +140,7 @@ impl Core {
             scheduler_handle: None,
             watcher_handle: None,
             mcp_watcher_handle: None,
+            agent_watcher_handle: None,
         })
     }
 
@@ -288,6 +290,55 @@ impl Core {
         ) {
             self.mcp_watcher_handle = Some(watcher);
             tracing::info!("MCP file watcher started");
+        }
+
+        // Start agent YAML file watcher (Phase 3 V3: full lifecycle management)
+        let agents_dir = std::path::PathBuf::from("agents");
+        if agents_dir.exists() {
+            use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
+            use std::sync::mpsc;
+
+            let (tx, rx) = mpsc::channel::<Result<notify::Event, notify::Error>>();
+            match RecommendedWatcher::new(tx, Config::default()) {
+                Ok(mut watcher) => {
+                    if let Err(e) = watcher.watch(&agents_dir, RecursiveMode::NonRecursive) {
+                        tracing::warn!("Failed to watch agents dir: {e}");
+                    } else {
+                        let agent_watch_dir = agents_dir.clone();
+                        let handle = tokio::task::spawn_blocking(move || {
+                            let _watcher = watcher;
+                            for res in rx {
+                                match res {
+                                    Ok(event) => {
+                                        let is_yaml_change = matches!(
+                                            event.kind,
+                                            EventKind::Create(_) | EventKind::Modify(_) | EventKind::Remove(_)
+                                        ) && event.paths.iter().any(|p| {
+                                            p.extension().and_then(|e| e.to_str()) == Some("yaml")
+                                        });
+                                        if is_yaml_change {
+                                            tracing::info!(
+                                                "[Agent Watcher] Agent YAML changed: {:?} (dir: {:?})",
+                                                event.paths,
+                                                agent_watch_dir,
+                                            );
+                                            // Phase 3 V3: re-load config, diff registry, spawn/stop agents
+                                        }
+                                    }
+                                    Err(e) => tracing::error!("[Agent Watcher] Error: {e}"),
+                                }
+                            }
+                        });
+                        self.agent_watcher_handle = Some(handle);
+                        tracing::info!("Agent file watcher started for: {:?}", agents_dir);
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to create agent watcher: {e}");
+                }
+            }
+        } else {
+            tracing::debug!("Agent directory 'agents/' does not exist — skipping agent watcher");
         }
 
         // Start scheduler task
