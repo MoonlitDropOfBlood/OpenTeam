@@ -93,7 +93,7 @@ impl Core {
             }
         }
 
-        // Discover MCP servers: global + assistant + per-agent mcps.json files
+        // Discover MCP servers: global + assistant + per-agent mcp.json files
         let global_mcp_path = mcp::registry::global_mcp_path();
         let asst_mcp_path = mcp::registry::assistant_mcp_path();
         let mut mcp_paths = vec![global_mcp_path.clone()];
@@ -101,13 +101,13 @@ impl Core {
             mcp_paths.push(asst_mcp_path.clone());
         }
         for record in registry.all() {
-            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcps.json");
+            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcp.json");
             if agent_mcp_path.exists() {
                 mcp_paths.push(agent_mcp_path);
             }
         }
         let mcp_registry = Arc::new(RwLock::new(
-            mcp::registry::McpRegistry::discover_all(&mcp_paths)?
+            mcp::registry::McpRegistry::discover_all(&mcp_paths).await?
         ));
 
         Ok(Self {
@@ -179,7 +179,7 @@ impl Core {
         }
         let agents_dir = std::path::PathBuf::from("agents");
         for record in self.registry.all() {
-            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcps.json");
+            let agent_mcp_path = agents_dir.join(&record.config.name).join("mcp.json");
             if agent_mcp_path.exists() {
                 mcp_watch_files.push(agent_mcp_path);
             }

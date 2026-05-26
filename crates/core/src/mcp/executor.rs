@@ -43,11 +43,11 @@ pub async fn execute_tool(
     });
 
     // Spawn the MCP server process
-    let mut cmd = Command::new(&server.command);
-    for arg in &server.args {
+    let mut cmd = Command::new(&server.entry.command);
+    for arg in &server.entry.args {
         cmd.arg(arg);
     }
-    for (key, val) in &server.env {
+    for (key, val) in &server.entry.env {
         let resolved = if val.starts_with("${") && val.ends_with('}') {
             let var_name = &val[2..val.len() - 1];
             std::env::var(var_name).unwrap_or_default()
