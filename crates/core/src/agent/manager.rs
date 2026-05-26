@@ -6,7 +6,8 @@ use tokio_util::sync::CancellationToken;
 use crate::config::agent::AgentConfig;
 use crate::llm::gateway::{LlmGateway, ChatRequest, ChatMessage};
 use crate::mcp::config::McpServerConfig;
-use crate::registry::{AgentId, AgentRegistry};
+use crate::mcp::registry::McpRegistry;
+use crate::registry::{AgentId, AgentRegistry, AgentStatus};
 use crate::skill::registry::SkillRegistry;
 use crate::memory::store::MemoryStore;
 use crate::memory::types::{MemoryEntry, MemoryType};
@@ -29,10 +30,11 @@ impl AgentManager {
     pub async fn spawn_agent(
         &self,
         config: AgentConfig,
-        _registry: Arc<RwLock<AgentRegistry>>,
+        agent_registry: Arc<RwLock<AgentRegistry>>,
         llm_gateway: Arc<LlmGateway>,
         skill_registry: Arc<RwLock<SkillRegistry>>,
-    memory_store: Arc<MemoryStore>,
+        memory_store: Arc<MemoryStore>,
+        mcp_registry: Arc<RwLock<McpRegistry>>,
     ) -> AgentId {
         let id = uuid::Uuid::now_v7();
         let (control_tx, mut control_rx) = mpsc::channel::<AgentCommand>(64);
@@ -43,9 +45,14 @@ impl AgentManager {
         let llm_gateway_clone = llm_gateway;
         let skills_clone = skill_registry;
         let memory_clone = memory_store;
+        let mcp_clone = mcp_registry;
+        let registry_clone = agent_registry.clone();
 
         let handle = tokio::spawn(async move {
-            agent_main_loop(&config_clone, id_clone, &mut control_rx, cancel_clone, llm_gateway_clone, skills_clone, memory_clone).await;
+            agent_main_loop(
+                &config_clone, id_clone, &mut control_rx, cancel_clone,
+                llm_gateway_clone, skills_clone, memory_clone, mcp_clone, registry_clone,
+            ).await;
         });
 
         let agent_handle = AgentHandle {
@@ -83,12 +90,14 @@ impl AgentManager {
 
 async fn agent_main_loop(
     config: &AgentConfig,
-    _id: AgentId,
+    id: AgentId,
     control_rx: &mut mpsc::Receiver<AgentCommand>,
     cancel: CancellationToken,
     llm_gateway: Arc<LlmGateway>,
-skill_registry: Arc<RwLock<SkillRegistry>>,
+    skill_registry: Arc<RwLock<SkillRegistry>>,
     memory_store: Arc<MemoryStore>,
+    mcp_registry: Arc<RwLock<McpRegistry>>,
+    agent_registry: Arc<RwLock<AgentRegistry>>,
 ) {
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
@@ -138,6 +147,29 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
             while let Some(msg) = inbox.pop() {
                 tracing::info!("Agent {} processing message (pri={})", config.name, msg.priority);
 
+                // Mark agent as busy
+                {
+                    let mut reg = agent_registry.write().await;
+                    reg.update_status(&id, AgentStatus::Busy).ok();
+                }
+
+                // Inject tools from MCP registry (built-in + discovered MCP servers)
+                let tools: Vec<crate::llm::gateway::ToolDefinition> = mcp_registry.read().await
+                    .get_all_tools()
+                    .into_iter()
+                    .map(|t| crate::llm::gateway::ToolDefinition {
+                        name: t.name,
+                        description: t.description,
+                        input_schema: t.input_schema,
+                    })
+                    .collect();
+                // Build server configs map for tool execution
+                let servers: HashMap<String, McpServerConfig> = mcp_registry.read().await
+                    .list_servers()
+                    .into_iter()
+                    .map(|s| (s.name.clone(), s.clone()))
+                    .collect();
+
                 // Build full system prompt with memory context for this message
                 let full_prompt = {
                     // Search for relevant memories from this agent (Phase 3 V3: real embedding)
@@ -177,7 +209,7 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                             content: msg.content.clone(),
                         },
                     ],
-                    tools: vec![],
+                    tools: tools.clone(),
                 };
 
                 // Collect messages for the conversation (may grow with tool calls)
@@ -228,7 +260,7 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                                 let result = crate::mcp::executor::execute_tool(
                                     tc,
                                     &tc.name,
-                                    &HashMap::<String, McpServerConfig>::new(),
+                                    &servers,
                                 )
                                 .await
                                 .unwrap_or_else(|e| format!("Error: {e}"));
@@ -335,6 +367,12 @@ skill_registry: Arc<RwLock<SkillRegistry>>,
                             tracing::error!("Agent {} LLM call failed: {e}", config.name);
                         }
                     }
+                }
+
+                // Mark agent as idle after message processing
+                {
+                    let mut reg = agent_registry.write().await;
+                    reg.update_status(&id, AgentStatus::Idle).ok();
                 }
             }
         }

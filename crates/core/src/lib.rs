@@ -133,6 +133,21 @@ impl Core {
         self.feishu_bridge.check_auth().await.unwrap_or(false)
     }
 
+    /// Spawn all registered agents with full dependencies
+    pub async fn spawn_all_agents(&self) {
+        let agent_registry = Arc::new(RwLock::new(self.registry.clone()));
+        for record in self.registry.all() {
+            self.agent_manager.spawn_agent(
+                record.config.clone(),
+                agent_registry.clone(),
+                Arc::new(self.llm_gateway.clone()),
+                self.skill_registry.clone(),
+                self.memory_store.clone(),
+                self.mcp_registry.clone(),
+            ).await;
+        }
+    }
+
     pub fn list_agents(&self) -> Vec<&registry::registry::AgentRecord> {
         self.registry.all()
     }

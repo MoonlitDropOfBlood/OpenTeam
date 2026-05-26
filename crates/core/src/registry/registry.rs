@@ -21,6 +21,7 @@ pub struct AgentRecord {
     pub current_task: Option<String>,
 }
 
+#[derive(Clone)]
 pub struct AgentRegistry {
     agents: HashMap<AgentId, AgentRecord>,
 }
