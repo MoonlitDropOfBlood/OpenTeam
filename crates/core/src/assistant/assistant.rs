@@ -4,6 +4,7 @@ use crate::config::agent::ModelConfig;
 use crate::llm::gateway::{ChatMessage, ChatRequest, LlmGateway};
 use crate::CoreError;
 use chrono::{DateTime, Utc};
+use std::collections::HashMap;
 
 /// Get current UTC time without chrono `clock` feature (uses std::time)
 fn utc_now() -> DateTime<Utc> {
@@ -25,6 +26,8 @@ pub struct AssistantAgent {
     pub pending_conversation_count: u32,
     /// Assistant responses queued for the scheduler to send via Feishu
     pub pending_responses: Vec<String>,
+    /// Maps task_id → thread_id for tracking which thread each task is in
+    pub active_threads: HashMap<String, String>,
 }
 
 impl AssistantAgent {
@@ -37,6 +40,7 @@ impl AssistantAgent {
             active_tasks: Vec::new(),
             pending_conversation_count: 0,
             pending_responses: Vec::new(),
+            active_threads: HashMap::new(),
         }
     }
 
@@ -48,6 +52,28 @@ impl AssistantAgent {
     /// Get and clear all pending assistant responses (for scheduler to send via Feishu)
     pub fn drain_responses(&mut self) -> Vec<String> {
         self.pending_responses.drain(..).collect()
+    }
+
+    /// Generate a dispatch action that includes thread context
+    pub fn create_dispatch_action(
+        &mut self,
+        target_agent: &str,
+        message: &str,
+        thread_id: Option<&str>,
+    ) -> AssistantAction {
+        let full_message = match thread_id {
+            Some(tid) => {
+                // Track the task-thread mapping
+                self.active_threads
+                    .insert(format!("{target_agent}-{}", uuid::Uuid::now_v7()), tid.to_string());
+                format!("[Thread: {}] {}", tid, message)
+            }
+            None => message.to_string(),
+        };
+        AssistantAction::Dispatch {
+            target_agent: target_agent.to_string(),
+            message: full_message,
+        }
     }
 
     pub fn default_role() -> &'static str {

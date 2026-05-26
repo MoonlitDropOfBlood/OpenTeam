@@ -63,7 +63,7 @@ impl MessageRouter {
         let matched = find_matching_agents(content, registry);
         for agent in matched {
             if let Some(sender) = self.agent_senders.get(&agent.id) {
-                let cmd = AgentCommand::InjectMessage(content.to_string());
+                let cmd = AgentCommand::InjectMessage { content: content.to_string(), thread_id: None };
                 if sender.send(cmd).await.is_ok() {
                     targeted.push(agent.id);
                 }
@@ -75,7 +75,7 @@ impl MessageRouter {
             for agent in registry.all() {
                 if content.contains(&agent.config.name) {
                     if let Some(sender) = self.agent_senders.get(&agent.id) {
-                        let cmd = AgentCommand::InjectMessage(content.to_string());
+                        let cmd = AgentCommand::InjectMessage { content: content.to_string(), thread_id: None };
                         if sender.send(cmd).await.is_ok() {
                             targeted.push(agent.id);
                         }

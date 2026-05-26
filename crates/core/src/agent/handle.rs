@@ -10,7 +10,7 @@ pub enum AgentCommand {
     Stop,
     Pause,
     Resume,
-    InjectMessage(String),
+    InjectMessage { content: String, thread_id: Option<String> },
     OverrideContext(String),
 }
 

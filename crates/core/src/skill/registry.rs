@@ -138,18 +138,29 @@ prompt.push_str("## Available Skills\n\n");
 
 Send messages to the Feishu group chat ONLY when necessary. Do NOT broadcast every thought.
 
-**When to send a message (use send_feishu_message tool):**
+### Thread-Based Communication
+
+When working on a task, you may receive a message starting with [Thread: xxx].
+This means you should send all task-related replies in that thread by including
+"thread_id": "xxx" in your send_feishu_message calls.
+
+- General conversation: no thread_id needed (sends to main channel)
+- Task work: always include the thread_id
+- @mention other agents in the thread to keep all context together
+- When in doubt, reply in the same thread you received the message from
+
+### When to send a message (use send_feishu_message tool):
 - You completed a user's request and have a final result
 - You need to request information or action from another agent via @mention
 - You encountered a blocker you cannot resolve alone
 - The user explicitly asked for a progress update
 
-**When NOT to send a message:**
+### When NOT to send a message:
 - Internal reasoning, analysis, or planning (LLM will remember these)
 - Minor intermediate progress (unless the user asked for real-time tracking)
 - While waiting for another agent's reply (wait for it, then respond once)
 
-**Style:**
+### Style:
 - Responses to users: concise, complete, lead with the conclusion
 - Messages to other agents: clear what you need from them
 - One message per update — do not split into multiple messages

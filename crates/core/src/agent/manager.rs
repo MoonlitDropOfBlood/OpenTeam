@@ -122,10 +122,11 @@ async fn agent_main_loop(
                         is_paused = false;
                         tracing::info!("Agent {} resumed", config.name);
                     }
-                    AgentCommand::InjectMessage(content) => {
+                    AgentCommand::InjectMessage { content, thread_id } => {
                         inbox.push(InboxMessage {
                             priority: 3,
                             content,
+                            thread_id,
                             received_at: SystemTime::now()
                                 .duration_since(UNIX_EPOCH)
                                 .unwrap_or_default()
@@ -181,7 +182,7 @@ async fn agent_main_loop(
                         3,
                     ).await.unwrap_or_default();
 
-                    if memories.is_empty() {
+                    let memory_prompt = if memories.is_empty() {
                         base_prompt.clone()
                     } else {
                         let mut prompt = base_prompt.clone();
@@ -197,6 +198,16 @@ async fn agent_main_loop(
                             ));
                         }
                         prompt
+                    };
+
+                    // Inject thread context if the message came from a thread
+                    if let Some(ref tid) = msg.thread_id {
+                        format!(
+                            "{}\n\n## Thread Context\nYou are currently working in thread: {}. All task-related messages should be sent in this thread via the send_feishu_message tool with thread_id=\"{}\". Keep all task collaboration within the thread to maintain context isolation.",
+                            memory_prompt, tid, tid
+                        )
+                    } else {
+                        memory_prompt
                     }
                 };
 

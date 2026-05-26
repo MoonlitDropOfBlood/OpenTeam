@@ -5,6 +5,7 @@ use std::collections::BinaryHeap;
 pub struct InboxMessage {
     pub priority: u8,
     pub content: String,
+    pub thread_id: Option<String>,
     pub received_at: i64,
 }
 
@@ -64,6 +65,7 @@ mod tests {
         InboxMessage {
             priority,
             content: content.to_string(),
+            thread_id: None,
             received_at: std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()

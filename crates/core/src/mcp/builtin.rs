@@ -107,7 +107,7 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "send_feishu_message".into(),
-            description: "Send a message to the Feishu group chat. Use this ONLY when you need to communicate results to the user, request collaboration from another agent via @mention, or escalate an issue you cannot resolve yourself. Do NOT use this for internal reasoning or intermediate thoughts.".into(),
+            description: "Send a message to Feishu. If thread_id is provided, replies in that thread. If not, sends to the main channel. Use this to communicate results, request collaboration via @mention, or escalate issues.".into(),
             input_schema: serde_json::json!({
                 "type": "object",
                 "properties": {
@@ -116,6 +116,10 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
                         "type": "array",
                         "items": {"type": "string"},
                         "description": "Optional list of agent names to @mention"
+                    },
+                    "thread_id": {
+                        "type": "string",
+                        "description": "Optional thread ID to reply in. Use this when responding to a task assignment."
                     }
                 },
                 "required": ["message"]
@@ -336,23 +340,32 @@ async fn cmd_web_fetch(args: &serde_json::Value) -> Result<String, CoreError> {
 async fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> {
     let message = args["message"].as_str()
         .ok_or_else(|| CoreError::Mcp("send_feishu_message requires 'message'".into()))?;
+    let thread_id = args["thread_id"].as_str()
+        .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) });
 
     let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
     let guard = lock.lock().await;
     let config = guard.as_ref()
         .ok_or_else(|| CoreError::Mcp("FeishuBridge not initialized".into()))?;
 
-    let outgoing = OutgoingMessage {
-        chat_id: config.chat_id.clone(),
-        thread_id: None,
-        text: message.to_string(),
-        mentions: vec![],
-        priority: MessagePriority::Secretary,
-    };
-
-    let msg_id = config.bridge.send_message(&outgoing).await
-        .map_err(|e| CoreError::Mcp(format!("Feishu send failed: {e}")))?;
-
-    tracing::info!("[send_feishu] Sent to Feishu: message_id={msg_id}");
-    Ok(format!("Message sent to Feishu (id: {msg_id})"))
+    if let Some(tid) = &thread_id {
+        // Reply in thread
+        let msg_id = config.bridge.reply_to_message(tid, message, true).await
+            .map_err(|e| CoreError::Mcp(format!("Thread reply failed: {e}")))?;
+        tracing::info!("[send_feishu] Replied in thread {tid}: message_id={msg_id}");
+        Ok(format!("Replied in thread (id: {msg_id})"))
+    } else {
+        // Send to main channel
+        let outgoing = OutgoingMessage {
+            chat_id: config.chat_id.clone(),
+            thread_id: None,
+            text: message.to_string(),
+            mentions: vec![],
+            priority: MessagePriority::Secretary,
+        };
+        let msg_id = config.bridge.send_message(&outgoing).await
+            .map_err(|e| CoreError::Mcp(format!("Feishu send failed: {e}")))?;
+        tracing::info!("[send_feishu] Sent to main channel: message_id={msg_id}");
+        Ok(format!("Message sent (id: {msg_id})"))
+    }
 }
