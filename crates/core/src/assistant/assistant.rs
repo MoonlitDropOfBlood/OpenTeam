@@ -97,13 +97,37 @@ Summary Rules (Feishu messages):
 - Urgent situations (production outage, P0, crash): notify immediately, bypass summary interval
 - Always batch multiple updates into a single summary message — do not push one at a time
 
+HR Functions (hiring and firing agents):
+You have HR capabilities through the create_agent and delete_agent actions.
+
+### Hiring (create_agent)
+When the user wants to create a new agent:
+1. Ask the user for the key details: agent name, role description, preferred LLM provider/model
+2. Ask about personality and trigger keywords (optional)
+3. Use the create_agent action to generate the YAML config file
+4. The system will automatically detect the new file and activate the agent
+5. Confirm to the user that the agent has been created
+
+### Firing (delete_agent)
+When the user wants to remove an agent:
+1. Confirm the agent name to delete
+2. Use the delete_agent action to remove the YAML file and all associated data
+3. The system will clean up:
+   - Agent YAML configuration
+   - Per-agent skill files
+   - Per-agent MCP configs
+   - (Phase 3 V3: also removes Feishu bot and memory entries)
+4. Confirm to the user that the agent has been removed
+
 Output Format:
 You MUST reply in JSON format with a reasoning field and an actions array.
 reasoning: explain your thought process in English (this is internal thinking, not shown to the user).
 Each action in the actions array must have a type field:
 - "dispatch": assign a task to an Agent. Requires target_agent and message.
 - "respond": reply directly to the user. Requires message.
-- "store_memory": store in memory. Requires title, summary, importance(1-10)."#
+- "store_memory": store in memory. Requires title, summary, importance(1-10).
+- "create_agent": hire a new agent. Requires name, role, provider, model, max_tokens. Optional: personality, api_key_env, triggers.
+- "delete_agent": fire an agent. Requires name."#
     }
 
     /// Process an incoming message through LLM and return actions
@@ -204,6 +228,99 @@ Each action in the actions array must have a type field:
                 AssistantAction::Respond { message: resp_msg } => {
                     tracing::info!("[Assistant] Response queued: {resp_msg}");
                     self.pending_responses.push(resp_msg.clone());
+                }
+                AssistantAction::CreateAgent {
+                    name,
+                    role,
+                    personality,
+                    provider,
+                    model,
+                    api_key_env,
+                    max_tokens,
+                    triggers,
+                } => {
+                    // Build agent YAML content
+                    let mut yaml_content = format!(
+                        r#"name: "{}"
+role: "{}"
+personality: "{}"
+llm:
+  primary:
+    provider: {}
+    model: {}
+    api_key_env: {}
+    max_tokens: {}
+triggers:"#,
+                        name,
+                        role,
+                        personality.as_deref().unwrap_or(""),
+                        provider,
+                        model,
+                        api_key_env.as_deref().unwrap_or(""),
+                        max_tokens,
+                    );
+                    for t in triggers {
+                        yaml_content.push_str(&format!("\n  - pattern: \"{}\"", t));
+                    }
+                    yaml_content.push_str(&format!(
+                        "\n  - pattern: \"@{name}|@{name}\"\n    auto_respond: true\n"
+                    ));
+
+                    let agents_dir = std::path::Path::new("agents");
+                    let path = agents_dir.join(format!("{}.yaml", name.to_lowercase()));
+                    match std::fs::write(&path, &yaml_content) {
+                        Ok(_) => tracing::info!("[HR] Created agent '{}' at {:?}", name, path),
+                        Err(e) => tracing::error!("[HR] Failed to create agent '{}': {e}", name),
+                    }
+                    self.pending_responses.push(format!(
+                        "Agent '{}' has been created. YAML written to {:?}.",
+                        name, path
+                    ));
+                }
+                AssistantAction::DeleteAgent { name } => {
+                    let path =
+                        std::path::Path::new("agents").join(format!("{}.yaml", name.to_lowercase()));
+                    let mut deleted = false;
+
+                    // Delete agent YAML
+                    if path.exists() {
+                        match std::fs::remove_file(&path) {
+                            Ok(_) => {
+                                tracing::info!("[HR] Deleted agent '{}' YAML at {:?}", name, path);
+                                deleted = true;
+                            }
+                            Err(e) => tracing::error!(
+                                "[HR] Failed to delete agent YAML '{}': {e}",
+                                name
+                            ),
+                        }
+                    }
+
+                    // Clean up per-agent skill directory
+                    let skills_dir = std::path::Path::new("agents").join(&name).join("skills");
+                    if skills_dir.exists() {
+                        let _ = std::fs::remove_dir_all(&skills_dir);
+                        tracing::info!("[HR] Deleted agent '{}' skills", name);
+                    }
+
+                    // Clean up per-agent MCP config
+                    let mcp_path = std::path::Path::new("agents").join(&name).join("mcps.json");
+                    if mcp_path.exists() {
+                        let _ = std::fs::remove_file(&mcp_path);
+                        tracing::info!("[HR] Deleted agent '{}' MCP config", name);
+                    }
+
+                    if deleted {
+                        self.pending_responses.push(format!(
+                            "Agent '{}' has been deleted. All associated files cleaned up.",
+                            name
+                        ));
+                    } else {
+                        self.pending_responses.push(format!(
+                            "Could not find agent '{}' in the agents directory.",
+                            name
+                        ));
+                    }
                 }
             }
         }

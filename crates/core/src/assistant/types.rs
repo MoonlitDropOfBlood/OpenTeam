@@ -29,6 +29,23 @@ pub enum AssistantAction {
         summary: String,
         importance: u8,
     },
+    /// Hire: create a new agent from conversation
+    #[serde(rename = "create_agent")]
+    CreateAgent {
+        name: String,
+        role: String,
+        personality: Option<String>,
+        provider: String,
+        model: String,
+        api_key_env: Option<String>,
+        max_tokens: u32,
+        triggers: Vec<String>,
+    },
+    /// Fire: delete an agent and all its data
+    #[serde(rename = "delete_agent")]
+    DeleteAgent {
+        name: String,
+    },
 }
 
 /// Track a dispatched task
