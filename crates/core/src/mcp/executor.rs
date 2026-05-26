@@ -10,6 +10,7 @@ static PROCESS_CACHE: once_cell::sync::Lazy<Mutex<HashMap<String, CachedProcess>
     once_cell::sync::Lazy::new(|| Mutex::new(HashMap::new()));
 
 struct CachedProcess {
+    #[allow(dead_code)]
     child: Option<tokio::process::Child>,
     last_used: Instant,
 }

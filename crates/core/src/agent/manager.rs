@@ -173,11 +173,11 @@ async fn agent_main_loop(
 
                 // Build full system prompt with memory context for this message
                 let full_prompt = {
-                    // Search for relevant memories from this agent (Phase 3 V3: real embedding)
-                    let zero_vec = vec![0.0f32; 768];
+                    // Hash-based embedding from message content
+                    let query_emb = crate::memory::vectorizer::hash_embed(&msg.content);
                     let memories = memory_store.search_semantic(
                         &config.name,
-                        &zero_vec,
+                        &query_emb,
                         3,
                     ).await.unwrap_or_default();
 
@@ -323,7 +323,7 @@ async fn agent_main_loop(
                                 artifacts: vec![],
                                 pending_todos: vec![],
                                 importance: 5,
-                                embedding: None,
+                                embedding: Some(crate::memory::vectorizer::hash_embed(&response.content)),
                                 turn_indices: vec![],
                                 created_at: chrono::DateTime::<chrono::Utc>::from(
                                     SystemTime::now(),
