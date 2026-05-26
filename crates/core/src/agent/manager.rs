@@ -101,6 +101,7 @@ async fn agent_main_loop(
 ) {
     let mut inbox = PriorityInbox::new();
     let mut is_paused = false;
+    let mut retry_count: u32 = 0;  // Per-agent escalation tracking
 
     // Build base system prompt: role + skill instructions (constant across messages)
     let base_prompt = skill_registry.read().await.build_system_prompt(&config.role);
@@ -335,6 +336,21 @@ async fn agent_main_loop(
                         }
                     }
                     Err(e) => {
+                        retry_count += 1;
+                        let escalation_level = if retry_count <= 2 {
+                            1  // Initial retry
+                        } else if retry_count <= 5 {
+                            2  // Escalated: consider fallback or supervisor alert
+                        } else {
+                            3  // Critical: agent may be stuck, needs human intervention
+                        };
+                        tracing::warn!(
+                            "Agent {} escalation level {} (retry {}): {e}",
+                            config.name,
+                            escalation_level,
+                            retry_count,
+                        );
+
                         // Try fallback model if primary fails
                         if let Some(ref fallback) = config.llm.fallback {
                             tracing::warn!(
@@ -353,11 +369,14 @@ async fn agent_main_loop(
                                 tools: vec![],
                             };
                             match llm_gateway.chat(fallback, &fb_request).await {
-                                Ok(resp) => tracing::info!(
-                                    "Agent {} fallback response: {}",
-                                    config.name,
-                                    &resp.content[..resp.content.len().min(100)],
-                                ),
+                                Ok(resp) => {
+                                    retry_count = 0;  // Reset on success
+                                    tracing::info!(
+                                        "Agent {} fallback response: {}",
+                                        config.name,
+                                        &resp.content[..resp.content.len().min(100)],
+                                    );
+                                }
                                 Err(e2) => tracing::error!(
                                     "Agent {} both LLMs failed: primary={e}, fallback={e2}",
                                     config.name,

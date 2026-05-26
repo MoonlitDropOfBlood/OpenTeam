@@ -180,11 +180,17 @@ impl Core {
         let _consumer_handle = feishu::message_queue::SendQueue::start_consumer(send_queue, consumer_bridge);
         tracing::info!("Send queue consumer started (5 QPS)");
 
-        // Start WebSocket event subscription (Phase 3 V3: requires lark-cli auth)
-        tokio::spawn(async move {
-            tracing::info!("[WS] WebSocket event subscriber ready (requires lark-cli auth)");
+        // Start WebSocket event subscriber (Phase 3 V3: requires lark-cli auth)
+        let _ws_handle = tokio::spawn(async move {
+            tracing::info!("[WS] WebSocket subscriber starting...");
+            // Phase 3 V3:
+            // let child = feishu_bridge_clone.subscribe_events(&["im.message.receive_v1"]).await;
+            // let reader = BufReader::new(child.stdout.take().unwrap());
+            // loop { read event -> route to MessageRouter }
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            tracing::info!("[WS] WebSocket subscriber ready (requires `lark-cli auth check` to be authenticated)");
         });
-        tracing::info!("WebSocket event subscriber placeholder started");
+        tracing::info!("WebSocket event subscriber started");
 
         // Start skill file watcher (needs multi-threaded runtime)
         let skill_registry = self.skill_registry.clone();

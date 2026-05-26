@@ -19,3 +19,4 @@ sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite", "macros"] }
 tokio-util = { version = "0.7", features = ["rt"] }
 notify = "7"
 regex = "1"
+once_cell = "1"

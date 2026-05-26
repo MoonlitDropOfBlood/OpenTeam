@@ -21,7 +21,8 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let agents_display: Vec<Line> = if app.agents.is_empty() {
         vec![Line::from("No agents registered. Press 'r' to refresh.")]
     } else {
-        app.agents
+        let mut lines: Vec<Line> = app
+            .agents
             .iter()
             .flat_map(|agent| {
                 let is_running = agent.status != "Idle" && agent.status != "Offline" && agent.status != "Paused";
@@ -47,7 +48,14 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                     Line::from(vec!["".into()]),
                 ]
             })
-            .collect()
+            .collect();
+        // Add Phase 3 V3 note for stop/edit/delete buttons
+        lines.push(Line::from(vec![
+            "  [Stop] [Edit] [Delete] — Phase 3 V3: requires Feishu integration"
+                .dim()
+                .into(),
+        ]));
+        lines
     };
 
     let agent_block = Block::default()

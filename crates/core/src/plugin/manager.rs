@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Instant;
 use tokio::sync::RwLock;
 
 #[derive(Debug, Clone)]
@@ -12,6 +13,7 @@ pub struct HookRegistration {
 pub struct PluginManager {
     hooks: RwLock<HashMap<String, Vec<HookRegistration>>>,
     running: RwLock<bool>,
+    crash_counts: RwLock<HashMap<String, Vec<Instant>>>,
 }
 
 impl PluginManager {
@@ -19,7 +21,30 @@ impl PluginManager {
         Self {
             hooks: RwLock::new(HashMap::new()),
             running: RwLock::new(false),
+            crash_counts: RwLock::new(HashMap::new()),
         }
+    }
+
+    /// Record a plugin crash. Returns true if circuit breaker should trip.
+    pub async fn record_crash(&self, plugin_name: &str) -> bool {
+        let now = Instant::now();
+        let mut counts = self.crash_counts.write().await;
+        let entry = counts.entry(plugin_name.to_string()).or_default();
+
+        // Remove crashes older than 5 minutes
+        entry.retain(|t| now.duration_since(*t).as_secs() < 300);
+        entry.push(now);
+
+        // Trip if 5+ crashes in 5 minutes
+        let tripped = entry.len() >= 5;
+        if tripped {
+            tracing::error!(
+                "[Supervisor] Circuit breaker TRIPPED for plugin '{}' — {} crashes in 5min",
+                plugin_name,
+                entry.len()
+            );
+        }
+        tripped
     }
 
     /// Start the plugin system

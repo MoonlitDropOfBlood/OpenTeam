@@ -5,7 +5,7 @@ use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use crate::app::App;
 
-pub fn draw(f: &mut Frame, area: Rect, _app: &App) {
+pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let title = Paragraph::new("Task Board")
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center);
@@ -13,34 +13,44 @@ pub fn draw(f: &mut Frame, area: Rect, _app: &App) {
 
     let inner = area.inner(ratatui::layout::Margin { vertical: 2, horizontal: 2 });
 
-    let tasks = vec![
-        Line::from(vec![
-            "[#42] User Registration Module".into(),
-            "  Assignee: 小红 (PM)".into(),
-            "  Status: PRD Complete".to_string().fg(Color::Green),
-        ]),
-        Line::from(vec!["".into()]),
-        Line::from(vec![
-            "[#43] Homepage Performance".into(),
-            "  Assignee: CodeCat (Dev)".into(),
-            "  Status: In Progress".to_string().fg(Color::Yellow),
-        ]),
-        Line::from(vec!["".into()]),
-        Line::from(vec![
-            "[#44] Dashboard Requirements".into(),
-            "  Assignee: 小红 (PM)".into(),
-            "  Status: Gathering Requirements".to_string().fg(Color::Blue),
-        ]),
-    ];
+    let task_lines: Vec<Line> = if app.tasks.is_empty() {
+        vec![Line::from(vec![
+            "No active tasks. Tasks will appear here when agents are processing requests."
+                .dim()
+                .into(),
+        ])]
+    } else {
+        app.tasks
+            .iter()
+            .flat_map(|task| {
+                let status_color = match task.status.as_str() {
+                    "Completed" | "PRD Complete" => Color::Green,
+                    "In Progress" | "Active" => Color::Yellow,
+                    "Gathering Requirements" | "Pending" => Color::Blue,
+                    _ => Color::Gray,
+                };
+                vec![
+                    Line::from(vec![
+                        format!("[#{}] {}", task.id, &task.title).into(),
+                        format!("  Assignee: {}", &task.assignee).into(),
+                        format!("  Status: {}", &task.status).fg(status_color),
+                    ]),
+                    Line::from(vec!["".into()]),
+                ]
+            })
+            .collect()
+    };
+
+    let task_count = app.tasks.len();
 
     let block = Block::default()
-        .title(" Tasks ")
+        .title(format!(" Tasks ({}) ", task_count))
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::Blue));
     let block_inner = block.inner(inner);
     f.render_widget(block, inner);
 
-    let list = Paragraph::new(tasks)
+    let list = Paragraph::new(task_lines)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));
     f.render_widget(list, block_inner);

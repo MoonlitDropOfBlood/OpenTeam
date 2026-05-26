@@ -25,6 +25,14 @@ pub struct MemoryDisplay {
     pub agent_name: String,
 }
 
+#[derive(Debug, Clone)]
+pub struct TaskInfo {
+    pub id: u64,
+    pub title: String,
+    pub assignee: String,
+    pub status: String,
+}
+
 pub struct App {
     pub current_page: Page,
     pub should_quit: bool,
@@ -36,6 +44,7 @@ pub struct App {
     pub plugin_running: bool,
     pub memories: Vec<MemoryDisplay>,
     pub auto_refresh: bool,
+    pub tasks: Vec<TaskInfo>,
 }
 
 impl App {
@@ -51,6 +60,7 @@ impl App {
             plugin_running: false,
             memories: Vec::new(),
             auto_refresh: true,
+            tasks: Vec::new(),
         }
     }
 

@@ -2,10 +2,36 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use crate::agent::handle::AgentCommand;
 use crate::registry::{AgentId, AgentRegistry};
+use crate::registry::registry::AgentRecord;
 
 /// Routes incoming Feishu messages to the correct agent(s)
 pub struct MessageRouter {
     agent_senders: HashMap<AgentId, mpsc::Sender<AgentCommand>>,
+}
+
+/// Check if a message matches any agent's trigger patterns
+pub fn find_matching_agents<'a>(
+    content: &str,
+    registry: &'a AgentRegistry,
+) -> Vec<&'a AgentRecord> {
+    let mut matched = Vec::new();
+    for agent in registry.all() {
+        for trigger in &agent.config.triggers {
+            // Simple substring match (Phase 3 V3: regex)
+            if content.contains(&trigger.pattern) {
+                matched.push(agent);
+                break;
+            }
+            // Also check @mention by agent name
+            if content.contains(&format!("@{}", agent.config.name)) {
+                if !matched.iter().any(|a| a.config.name == agent.config.name) {
+                    matched.push(agent);
+                }
+                break;
+            }
+        }
+    }
+    matched
 }
 
 impl MessageRouter {
@@ -22,7 +48,7 @@ impl MessageRouter {
     }
 
     /// Route a Feishu message to the appropriate agent(s)
-    /// Matches by agent name in the message content (e.g., @mention)
+    /// Matches by trigger patterns, @mentions, and agent name
     /// Returns list of agent IDs that received the message
     pub async fn route_message(
         &self,
@@ -31,12 +57,26 @@ impl MessageRouter {
     ) -> Vec<AgentId> {
         let mut targeted = Vec::new();
 
-        for agent in registry.all() {
-            if content.contains(&agent.config.name) {
-                if let Some(sender) = self.agent_senders.get(&agent.id) {
-                    let cmd = AgentCommand::InjectMessage(content.to_string());
-                    if sender.send(cmd).await.is_ok() {
-                        targeted.push(agent.id);
+        // First, check trigger patterns and @mentions
+        let matched = find_matching_agents(content, registry);
+        for agent in matched {
+            if let Some(sender) = self.agent_senders.get(&agent.id) {
+                let cmd = AgentCommand::InjectMessage(content.to_string());
+                if sender.send(cmd).await.is_ok() {
+                    targeted.push(agent.id);
+                }
+            }
+        }
+
+        // Fallback: also check by agent name substring (backward compat)
+        if targeted.is_empty() {
+            for agent in registry.all() {
+                if content.contains(&agent.config.name) {
+                    if let Some(sender) = self.agent_senders.get(&agent.id) {
+                        let cmd = AgentCommand::InjectMessage(content.to_string());
+                        if sender.send(cmd).await.is_ok() {
+                            targeted.push(agent.id);
+                        }
                     }
                 }
             }
