@@ -103,7 +103,7 @@ impl LlmGateway {
             limiter.acquire().await;
         }
 
-        match model_config.provider.as_str() {
+        match model_config.provider() {
             "anthropic" => self.call_anthropic(model_config, request).await,
             "ollama" => self.call_ollama(model_config, request).await,
             "deepseek" | "openai" => self.call_openai_compat(model_config, request).await,
@@ -136,7 +136,7 @@ impl LlmGateway {
         }).collect();
 
         let mut body = serde_json::json!({
-            "model": config.model,
+            "model": config.model_name(),
             "max_tokens": config.max_tokens,
             "system": request.system_prompt,
             "messages": messages,
@@ -221,7 +221,7 @@ impl LlmGateway {
         request: &ChatRequest,
     ) -> Result<ChatResponse, CoreError> {
         let body = serde_json::json!({
-            "model": config.model,
+            "model": config.model_name(),
             "system": request.system_prompt,
             "messages": request.messages.iter().map(|m| {
                 serde_json::json!({"role": m.role, "content": m.content})
@@ -270,7 +270,7 @@ async fn call_openai_compat(
 
     // Resolve API endpoint: base_url from config, or default per provider
     let api_endpoint = config.base_url.clone().unwrap_or_else(|| {
-        match config.provider.as_str() {
+        match config.provider() {
             "deepseek" => "https://api.deepseek.com/v1/chat/completions".to_string(),
             "openai" => "https://api.openai.com/v1/chat/completions".to_string(),
             _ => "https://api.openai.com/v1/chat/completions".to_string(), // generic fallback
@@ -284,7 +284,7 @@ async fn call_openai_compat(
         }));
 
         let mut body = serde_json::json!({
-            "model": config.model,
+            "model": config.model_name(),
             "max_tokens": config.max_tokens,
             "messages": all_messages,
         });

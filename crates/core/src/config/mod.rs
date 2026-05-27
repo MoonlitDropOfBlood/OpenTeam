@@ -53,8 +53,7 @@ name: "小红"
 role: "产品经理"
 llm:
   primary:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
 triggers:
@@ -62,7 +61,8 @@ triggers:
 "#;
         let config: agent::AgentConfig = serde_yaml::from_str(yaml).unwrap();
         assert_eq!(config.name, "小红");
-        assert_eq!(config.llm.primary.provider, "anthropic");
+        assert_eq!(config.llm.primary.provider(), "anthropic");
+        assert_eq!(config.llm.primary.model_name(), "claude-sonnet-4-20250514");
     }
 
     #[test]
@@ -75,8 +75,7 @@ triggers:
 role: "test"
 llm:
   primary:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
 triggers: []"#;

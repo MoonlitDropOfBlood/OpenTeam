@@ -1,7 +1,6 @@
 models:
   claude-sonnet-4:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
     fallback: claude-haiku-3-5
@@ -9,22 +8,19 @@ models:
     rate_limit: { rpm: 50, tpm: 100000 }
 
   ollama-qwen:
-    provider: ollama
-    model: qwen2.5:3b
+    model: ollama/qwen2.5:3b
     max_tokens: 4096
     timeout_secs: 60
 
   deepseek-v4-pro:
-    provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 200000 }
 
   deepseek-v4-flash:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120

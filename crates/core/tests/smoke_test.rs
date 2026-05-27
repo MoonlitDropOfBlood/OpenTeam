@@ -28,7 +28,7 @@ async fn test_agent_config_loading() {
     let agents = config::load_all_agents(Path::new("../../agents")).unwrap();
     assert!(!agents.is_empty());
     for agent in &agents {
-        assert!(!agent.llm.primary.provider.is_empty(), "Agent must have an LLM configured");
+        assert!(!agent.llm.primary.provider().is_empty(), "Agent must have an LLM configured");
     }
 }
 
