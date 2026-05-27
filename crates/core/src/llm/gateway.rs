@@ -68,10 +68,16 @@ pub struct TokenUsage {
 
 impl LlmGateway {
     pub fn new(config: LlmConfig) -> Self {
-        let client = reqwest::Client::builder()
-            .timeout(Duration::from_secs(180))
-            .build()
-            .unwrap();
+        let skip_verify = config.models.values().any(|m| m.skip_verify_ssl.unwrap_or(false));
+
+        let mut client_builder = reqwest::Client::builder()
+            .timeout(Duration::from_secs(180));
+
+        if skip_verify {
+            client_builder = client_builder.danger_accept_invalid_certs(true);
+        }
+
+        let client = client_builder.build().unwrap();
 
         let mut rate_limiters = HashMap::new();
         for (name, model_config) in &config.models {
@@ -103,12 +109,45 @@ impl LlmGateway {
             limiter.acquire().await;
         }
 
-        match model_config.provider() {
-            "anthropic" => self.call_anthropic(model_config, request).await,
-            "ollama" => self.call_ollama(model_config, request).await,
-            "deepseek" | "openai" => self.call_openai_compat(model_config, request).await,
-            provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
+        let max_retries = model_config.max_retries.unwrap_or(0);
+        let mut last_error = None;
+
+        for attempt in 0..=max_retries {
+            if attempt > 0 {
+                tracing::warn!(
+                    "Retry attempt {}/{} for {}",
+                    attempt,
+                    max_retries,
+                    model_config.model
+                );
+                tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
+            }
+
+            let result = match model_config.provider() {
+                "anthropic" => self.call_anthropic(model_config, request).await,
+                "ollama" => self.call_ollama(model_config, request).await,
+                "deepseek" | "openai" => self.call_openai_compat(model_config, request).await,
+                provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
+            };
+
+            match result {
+                Ok(resp) => return Ok(resp),
+                Err(e) => {
+                    // Don't retry on auth or bad request errors
+                    let err_str = e.to_string();
+                    if err_str.contains("401")
+                        || err_str.contains("403")
+                        || err_str.contains("400")
+                        || err_str.contains("Unsupported provider")
+                    {
+                        return Err(e);
+                    }
+                    last_error = Some(e);
+                }
+            }
         }
+
+        Err(last_error.unwrap_or_else(|| CoreError::Llm("Max retries exceeded".into())))
     }
 
     async fn call_anthropic(
@@ -152,6 +191,32 @@ impl LlmGateway {
                 })
             }).collect();
             body["tools"] = serde_json::json!(tools);
+        }
+
+        // Optional params for Anthropic
+        if let Some(temp) = config.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(top_p) = config.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(top_k) = config.top_k {
+            body["top_k"] = serde_json::json!(top_k);
+        }
+        if let Some(stop) = &config.stop {
+            body["stop_sequences"] = serde_json::json!(stop);
+        }
+        if let Some(effort) = &config.reasoning_effort {
+            let budget_tokens = match effort.as_str() {
+                "low" => 1024,
+                "medium" => 2048,
+                "high" => 4096,
+                _ => 2048,
+            };
+            body["thinking"] = serde_json::json!({
+                "type": "enabled",
+                "budget_tokens": budget_tokens,
+            });
         }
 
         let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
@@ -220,7 +285,7 @@ impl LlmGateway {
         config: &ModelConfig,
         request: &ChatRequest,
     ) -> Result<ChatResponse, CoreError> {
-        let body = serde_json::json!({
+        let mut body = serde_json::json!({
             "model": config.model_name(),
             "system": request.system_prompt,
             "messages": request.messages.iter().map(|m| {
@@ -228,6 +293,17 @@ impl LlmGateway {
             }).collect::<Vec<_>>(),
             "stream": false,
         });
+
+        // Optional params for Ollama
+        if let Some(temp) = config.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(top_p) = config.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(stop) = &config.stop {
+            body["stop"] = serde_json::json!(stop);
+        }
 
         let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(60));
 
@@ -315,6 +391,32 @@ async fn call_openai_compat(
                         }
                     }
                 }
+            }
+        }
+
+        // Optional params for OpenAI-compatible API
+        if let Some(temp) = config.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(top_p) = config.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(top_k) = config.top_k {
+            body["top_k"] = serde_json::json!(top_k);
+        }
+        if let Some(stop) = &config.stop {
+            body["stop"] = serde_json::json!(stop);
+        }
+        if let Some(pp) = config.presence_penalty {
+            body["presence_penalty"] = serde_json::json!(pp);
+        }
+        if let Some(fp) = config.frequency_penalty {
+            body["frequency_penalty"] = serde_json::json!(fp);
+        }
+        // DeepSeek thinking mode: when enabled, temperature must be 1
+        if let Some(thinking) = config.thinking {
+            if thinking {
+                body["temperature"] = serde_json::json!(1);
             }
         }
 
