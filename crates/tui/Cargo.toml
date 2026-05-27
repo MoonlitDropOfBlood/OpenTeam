@@ -1,0 +1,17 @@
+[package]
+name = "feishu-agent-tui"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "feishu-agent-tui"
+path = "src/main.rs"
+
+[dependencies]
+feishu-agent-core = { path = "../core" }
+tokio.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+anyhow.workspace = true
+ratatui = "0.28"
+crossterm = "0.28"
