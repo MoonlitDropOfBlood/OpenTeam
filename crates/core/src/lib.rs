@@ -59,9 +59,44 @@ impl Core {
         let assistant = Arc::new(Mutex::new(assistant::assistant::AssistantAgent::new()));
         let plugin_manager = plugin::manager::PluginManager::new();
 
-        // Read Feishu chat_id from env var
-        let feishu_chat_id = std::env::var("FEISHU_CHAT_ID").unwrap_or_default();
-        tracing::info!("Feishu chat_id: {}", if feishu_chat_id.is_empty() { "(not set)" } else { &feishu_chat_id });
+        // === Feishu mandatory validation ===
+
+        // 1. Check FEISHU_CHAT_ID env var — must be set
+        let feishu_chat_id = std::env::var("FEISHU_CHAT_ID")
+            .map_err(|_| CoreError::Config(
+                "FEISHU_CHAT_ID environment variable must be set. \
+                 Get it from your Feishu group chat settings.".into()
+            ))?;
+        tracing::info!("Feishu chat_id: {}", feishu_chat_id);
+
+        // 2. Check lark-cli is available in PATH
+        let lark_check = tokio::process::Command::new("lark-cli")
+            .arg("--version")
+            .output()
+            .await
+            .map_err(|e| CoreError::Config(format!(
+                "lark-cli not found in PATH. Feishu CLI is required. Error: {}", e
+            )))?;
+
+        if !lark_check.status.success() {
+            let stderr = String::from_utf8_lossy(&lark_check.stderr);
+            return Err(CoreError::Config(format!(
+                "lark-cli check failed: {}", stderr
+            )));
+        }
+        let _version = String::from_utf8_lossy(&lark_check.stdout).trim().to_string();
+        tracing::info!("Feishu CLI available");
+
+        // 3. Create bridge and check auth
+        let feishu_bridge = feishu::bridge::FeishuBridge::new();
+        let auth_ok = feishu_bridge.check_auth().await
+            .map_err(|e| CoreError::Config(format!("Feishu auth check failed: {e}")))?;
+        if !auth_ok {
+            return Err(CoreError::Config(
+                "Feishu not authenticated. Run 'lark-cli login' first.".into()
+            ));
+        }
+        tracing::info!("Feishu auth: OK");
 
         // Pick first available model config as default for summary generation
         let default_model_config = registry.all().first()
@@ -127,7 +162,7 @@ impl Core {
         Ok(Self {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config),
-            feishu_bridge: feishu::bridge::FeishuBridge::new(),
+            feishu_bridge,
             feishu_chat_id,
             default_model_config,
             memory_store,
