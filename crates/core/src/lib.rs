@@ -102,6 +102,9 @@ impl Core {
         let default_model_config = registry.all().first()
             .map(|r| r.config.llm.primary.clone());
 
+        // Release built-in skills to global config directory
+        skill::registry::release_builtin_skills()?;
+
         // Discover global skills
         let global_skills_dir = skill::registry::global_skills_dir();
         let mut skill_registry = skill::registry::SkillRegistry::discover(&global_skills_dir)?;

@@ -249,6 +249,58 @@ pub fn assistant_skills_dir() -> std::path::PathBuf {
     home_dir().join(".config/OpenTeam/assistant/skills")
 }
 
+/// Built-in skills embedded at compile time, released to global config on startup
+const BUILT_IN_SKILLS: &[(&str, &str, &str)] = &[
+    (
+        "feishu-doc",
+        "Create and manage Feishu documents",
+        "## Instructions\n\
+         You can create and edit Feishu documents. When asked to write documentation:\n\n\
+         1. Create a new Feishu doc using `lark-cli doc +create --title <title>`\n\
+         2. Write content using Feishu markdown format\n\
+         3. Share the doc link in your response\n\n\
+         ## Commands\n\n\
+         - `lark-cli doc +create --title \"<title>\"` — Create a new document\n\
+         - `lark-cli doc +get --doc-token <token>` — Get document content\n\
+         - `lark-cli doc +update --doc-token <token> --text \"<content>\"` — Update document\n\
+         - `lark-cli doc +search --query \"<query>\"` — Search documents\n\n\
+         ## Best Practices\n\n\
+         1. Always use a clear, descriptive title for new documents\n\
+         2. Use Feishu markdown format for rich content (headings, lists, tables)\n\
+         3. After creating a document, share the doc link with the user\n\
+         4. For long documents, create multiple sections with clear headings\n\
+         5. Review document content before sharing",
+    ),
+];
+
+/// Release built-in skills to the global skills directory if they don't exist.
+/// Called once at startup before skill discovery.
+pub fn release_builtin_skills() -> Result<(), CoreError> {
+    let global_dir = global_skills_dir();
+
+    for (name, description, instructions) in BUILT_IN_SKILLS {
+        let skill_dir = global_dir.join(name);
+        let skill_file = skill_dir.join("SKILL.md");
+
+        if skill_file.exists() {
+            tracing::debug!("Built-in skill already exists, skipping: {name}");
+            continue;
+        }
+
+        std::fs::create_dir_all(&skill_dir)?;
+
+        let frontmatter = format!(
+            "---\nname: {name}\ndescription: {description}\n---\n\n"
+        );
+        let content = format!("{frontmatter}{instructions}");
+        std::fs::write(&skill_file, &content)?;
+
+        tracing::info!("Released built-in skill: {name} -> {:?}", skill_file);
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
