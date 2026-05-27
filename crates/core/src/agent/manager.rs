@@ -241,7 +241,7 @@ async fn agent_main_loop(
                 });
 
                 let request = ChatRequest {
-                    model: config.llm.primary.model.clone(),
+                    model: config.llm.primary.model_name().to_string(),
                     system_prompt: full_prompt.clone(),
                     messages: thread_msgs.clone(),
                     tools: tools.clone(),
@@ -310,7 +310,7 @@ thread_msgs.push(ChatMessage { reasoning_content: None, role: "user".into(),
 
                             // Call LLM again with tool results (no tools needed this round)
                             let tool_request = ChatRequest {
-                                model: config.llm.primary.model.clone(),
+                                model: config.llm.primary.model_name().to_string(),
                                 system_prompt: full_prompt.clone(),
                                 messages: thread_msgs.clone(),
                                 tools: vec![],
@@ -414,7 +414,7 @@ thread_msgs.push(ChatMessage { reasoning_content: None, role: "user".into(),
                                 config.name,
                             );
                             let fb_request = ChatRequest {
-                                model: fallback.model.clone(),
+                                model: fallback.model_name().to_string(),
                                 system_prompt: base_prompt.clone(),
                                 messages: vec![
                                     ChatMessage { reasoning_content: None, role: "user".into(),

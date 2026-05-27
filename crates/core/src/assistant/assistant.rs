@@ -152,7 +152,7 @@ Each action in the actions array must have a type field:
         }
 
         let request = ChatRequest {
-            model: model_config.model.clone(),
+            model: model_config.model_name().to_string(),
             system_prompt: self.role.clone(),
             messages,
             tools: vec![],
