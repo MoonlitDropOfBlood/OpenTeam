@@ -45,7 +45,8 @@ pub struct ModelConfig {
     pub thinking: Option<bool>,
     /// Max retries on API failure
     pub max_retries: Option<u32>,
-    /// Skip SSL certificate verification
+    /// Skip SSL certificate verification. Applies to ALL models sharing the same
+    /// reqwest client — if any model has this enabled, TLS verification is disabled globally.
     pub skip_verify_ssl: Option<bool>,
 }
 

@@ -416,6 +416,9 @@ async fn call_openai_compat(
         // DeepSeek thinking mode: when enabled, temperature must be 1
         if let Some(thinking) = config.thinking {
             if thinking {
+                if config.temperature.map_or(false, |t| (t - 1.0).abs() > 0.01) {
+                    tracing::warn!("Model {}: thinking mode forces temperature=1, overriding configured value", config.model);
+                }
                 body["temperature"] = serde_json::json!(1);
             }
         }
