@@ -25,7 +25,7 @@
 - **SQLite 存储**：本地持久化，零外部依赖
 
 ### LLM 集成
-- **多 Provider**：Anthropic Claude + DeepSeek V4 + Ollama 本地模型
+- **多 Provider**：Anthropic Claude + DeepSeek V4 + OpenAI 兼容 + Ollama 本地模型
 - **Agent 级配置**：每个 Agent 独立配置 primary + fallback 模型
 - **限流保护**：滑动窗口 RPM 限流器
 - **超时控制**：可配置 API 超时
@@ -71,8 +71,7 @@ name: "CodeCat"
 role: "You are a senior backend engineer."
 llm:
   primary:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
 ```
@@ -84,15 +83,13 @@ role: "You are a senior backend engineer, skilled in Rust and system architectur
 personality: "Rigorous, organized, code-quality focused"
 llm:
   primary:
-    provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 100000 }
   fallback:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 4096
     timeout_secs: 60
@@ -126,22 +123,33 @@ Agent 的 `skills` 和 `mcps` 字段已移除 —— 现在通过文件系统自
 ```yaml
 llm:
   primary:
-    provider: anthropic                    # 必填: anthropic | ollama | deepseek
-    model: claude-sonnet-4-20250514        # 必填: 模型 ID
-    api_key_env: ANTHROPIC_API_KEY         # 可选: API Key 环境变量名
-    max_tokens: 8192                       # 必填: 最大输出 token
-    timeout_secs: 120                      # 可选: API 超时（秒）
-    rate_limit: { rpm: 50, tpm: 100000 }   # 可选: 速率限制
+    model: anthropic/claude-sonnet-4-20250514   # 必填: {provider}/{model_name}
+    api_key_env: ANTHROPIC_API_KEY              # 可选: API Key 环境变量名
+    max_tokens: 8192                            # 必填: 最大输出 token
+    timeout_secs: 120                           # 可选: API 超时（秒）
+    rate_limit: { rpm: 50, tpm: 100000 }        # 可选: 速率限制
+    temperature: 0.7                            # 可选: 采样温度
+    top_p: 0.9                                  # 可选: 核采样
 ```
 
 | 字段 | 类型 | 说明 |
 |------|------|------|
-| `provider` | String | 模型提供商。`anthropic` / `ollama` / `deepseek` |
-| `model` | String | 模型 ID。如 `claude-sonnet-4-20250514`、`deepseek-v4-pro`、`qwen2.5:3b` |
-| `api_key_env` | String | API Key 对应的环境变量名。不设置则使用默认名（`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY`） |
+| `model` | String | 格式 `{provider}/{model_name}`。Provider 从 `/` 前自动提取，如 `anthropic/claude-sonnet-4-20250514` |
+| `api_key_env` | String | API Key 对应的环境变量名。不设置则使用默认名（`ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`） |
 | `max_tokens` | u32 | 最大输出 token 数 |
 | `timeout_secs` | u64 | API 调用超时（默认 120s） |
 | `rate_limit` | Object | `{ rpm: number, tpm: number }` 速率限制 |
+| `temperature` | f64 | 采样温度 (0-2) |
+| `top_p` | f64 | 核采样参数 (0-1) |
+| `top_k` | u32 | Top-K 采样 |
+| `stop` | String[] | 停止序列 |
+| `presence_penalty` | f64 | 存在惩罚 (OpenAI 兼容) |
+| `frequency_penalty` | f64 | 频率惩罚 (OpenAI 兼容) |
+| `reasoning_effort` | String | Anthropic 思考预算: `low` / `medium` / `high` |
+| `thinking` | bool | DeepSeek 推理模式。启用时强制 temperature=1 |
+| `max_retries` | u32 | API 失败最大重试次数 |
+| `skip_verify_ssl` | bool | 跳过 SSL 证书验证 |
+| `base_url` | String | 自定义 API 端点，覆盖 provider 默认地址 |
 
 #### 全局模型池（可选）
 
@@ -150,32 +158,28 @@ llm:
 ```yaml
 models:
   claude-sonnet-4:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 100000 }
 
   deepseek-v4-pro:
-    provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 200000 }
 
   deepseek-v4-flash:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 100, tpm: 500000 }
 
   ollama-qwen:
-    provider: ollama
-    model: qwen2.5:3b
+    model: ollama/qwen2.5:3b
     max_tokens: 4096
     timeout_secs: 60
 ```
@@ -186,7 +190,10 @@ models:
 |----------|---------|------|
 | `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` |
 | `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` |
+| `openai` | `https://api.openai.com/v1/chat/completions` | `OPENAI_API_KEY` |
 | `ollama` | `http://localhost:11434/api/chat` | 无需认证 |
+
+`base_url` 可覆盖任意 provider 的默认端点，实现任意 OpenAI 兼容 API 接入。
 
 ---
 
@@ -261,6 +268,8 @@ You can create and edit Feishu documents. When asked to write documentation:
 ```
 
 Skill 内容自动注入 Agent 的 LLM System Prompt，作为"可用技能"区块。
+
+**内建 Skill（自动释放）：** 系统内置 `feishu-doc` skill（飞书文档管理），首次启动时自动释放到全局技能目录。无需手动创建。
 
 **文件热重载：** `SKILL.md` 文件变更自动生效。
 
@@ -338,8 +347,7 @@ name: "CodeCat"
 role: "You are a senior backend engineer."
 llm:
   primary:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
 triggers:
@@ -369,32 +377,38 @@ EOF
 
 ### 第六步（可选）：配置 Skill
 
+系统会自动释放内建 Skill（如 `feishu-doc`）到 `~/.config/OpenTeam/skills/`，无需手动创建。如需添加自定义 Skill：
+
 ```bash
-mkdir -p ~/.config/OpenTeam/skills/feishu-doc
-cat > ~/.config/OpenTeam/skills/feishu-doc/SKILL.md << 'EOF'
+mkdir -p ~/.config/OpenTeam/skills/my-custom-skill
+cat > ~/.config/OpenTeam/skills/my-custom-skill/SKILL.md << 'EOF'
 ---
-name: feishu-doc
-description: Create and manage Feishu documents
+name: my-custom-skill
+description: Your custom skill
 ---
 
-# Feishu Doc Skill
+# My Custom Skill
 
-You can create Feishu documents using lark-cli.
+Describe what this skill does here.
 EOF
 ```
 
-### 第七步（可选）：配置飞书
+### 第七步：配置飞书（**必选**）
+
+飞书集成现在为强制要求。启动前必须完成以下配置：
 
 ```bash
-# 登录飞书 CLI
+# 1. 登录飞书 CLI
 lark-cli login
 
-# 验证登录
+# 2. 验证登录
 lark-cli auth check
 
-# 设置飞书群 ID（用于发送消息）
+# 3. 设置飞书群 ID（用于发送消息）
 export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
 ```
+
+缺少任一配置，系统将在启动时报错并退出。
 
 配置状态可在 TUI F5 页面查看。
 

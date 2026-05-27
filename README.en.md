@@ -25,7 +25,7 @@
 - **SQLite Storage**: Local persistence, zero external dependencies
 
 ### LLM Integration
-- **Multiple Providers**: Anthropic Claude + DeepSeek V4 + Ollama local models
+- **Multiple Providers**: Anthropic Claude + DeepSeek V4 + OpenAI-compatible + Ollama local models
 - **Per-Agent Config**: Each Agent independently configures primary + fallback models
 - **Rate Limiting**: Sliding window RPM limiter
 - **Timeout Control**: Configurable API timeout per model
@@ -85,8 +85,7 @@ name: "CodeCat"
 role: "You are a senior backend engineer."
 llm:
   primary:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
 ```
@@ -98,15 +97,13 @@ role: "You are a senior backend engineer, skilled in Rust and system architectur
 personality: "Rigorous, organized, code-quality focused"
 llm:
   primary:
-    provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 100000 }
   fallback:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 4096
     timeout_secs: 60
@@ -137,12 +134,22 @@ The `skills` and `mcps` fields have been removed from Agent YAML — they are no
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `provider` | String | `anthropic` / `ollama` / `deepseek` |
-| `model` | String | Model ID (e.g. `claude-sonnet-4-20250514`, `deepseek-v4-pro`) |
-| `api_key_env` | String | Env var name for API key. Defaults: `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` |
+| `model` | String | Format: `{provider}/{model_name}`. Provider auto-extracted from `/` prefix, e.g. `anthropic/claude-sonnet-4-20250514` |
+| `api_key_env` | String | Env var name for API key. Defaults: `ANTHROPIC_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY` |
 | `max_tokens` | u32 | Maximum output tokens |
 | `timeout_secs` | u64 | API timeout in seconds (default 120) |
-| `rate_limit` | Object | `{ rpm: number, tpm: number }` |
+| `rate_limit` | Object | `{ rpm: number, tpm: number }` rate limiting |
+| `temperature` | f64 | Sampling temperature (0-2) |
+| `top_p` | f64 | Nucleus sampling (0-1) |
+| `top_k` | u32 | Top-K sampling |
+| `stop` | String[] | Stop sequences |
+| `presence_penalty` | f64 | Presence penalty (OpenAI-compat) |
+| `frequency_penalty` | f64 | Frequency penalty (OpenAI-compat) |
+| `reasoning_effort` | String | Anthropic thinking budget: `low` / `medium` / `high` |
+| `thinking` | bool | DeepSeek reasoning mode. Forces temperature=1 when enabled |
+| `max_retries` | u32 | Max retries on API failure |
+| `skip_verify_ssl` | bool | Skip SSL certificate verification |
+| `base_url` | String | Custom API endpoint, overrides provider default |
 
 #### Global Model Pool (optional)
 
@@ -151,32 +158,28 @@ The `skills` and `mcps` fields have been removed from Agent YAML — they are no
 ```yaml
 models:
   claude-sonnet-4:
-    provider: anthropic
-    model: claude-sonnet-4-20250514
+    model: anthropic/claude-sonnet-4-20250514
     api_key_env: ANTHROPIC_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 100000 }
 
   deepseek-v4-pro:
-    provider: deepseek
-    model: deepseek-v4-pro
+    model: deepseek/deepseek-v4-pro
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 200000 }
 
   deepseek-v4-flash:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
     timeout_secs: 120
     rate_limit: { rpm: 100, tpm: 500000 }
 
   ollama-qwen:
-    provider: ollama
-    model: qwen2.5:3b
+    model: ollama/qwen2.5:3b
     max_tokens: 4096
     timeout_secs: 60
 ```
@@ -187,7 +190,10 @@ models:
 |----------|-------------|------|
 | `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` |
 | `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` |
+| `openai` | `https://api.openai.com/v1/chat/completions` | `OPENAI_API_KEY` |
 | `ollama` | `http://localhost:11434/api/chat` | None required |
+
+The `base_url` field overrides the default endpoint for any provider, enabling any OpenAI-compatible API.
 
 ---
 
@@ -257,6 +263,8 @@ You can create and edit Feishu documents using `lark-cli`.
 
 Skill content is automatically injected into the agent's LLM System Prompt under "Available Skills".
 
+**Built-in Skills (auto-release):** The system ships with a built-in `feishu-doc` skill for Feishu document management. It is automatically released to the global skills directory on first startup — no manual setup required.
+
 **Hot-reload:** Changes to `SKILL.md` take effect immediately.
 
 ---
@@ -305,8 +313,7 @@ name: "CodeCat"
 role: "You are a senior backend engineer."
 llm:
   primary:
-    provider: deepseek
-    model: deepseek-v4-flash
+    model: deepseek/deepseek-v4-flash
     api_key_env: DEEPSEEK_API_KEY
     max_tokens: 8192
 triggers:
@@ -335,25 +342,31 @@ EOF
 
 ### Step 6 (Optional): Configure Skills
 
+Built-in skills (like `feishu-doc`) are auto-released to `~/.config/OpenTeam/skills/` on first startup — no manual setup needed. To add custom skills:
+
 ```bash
-mkdir -p ~/.config/OpenTeam/skills/feishu-doc
-cat > ~/.config/OpenTeam/skills/feishu-doc/SKILL.md << 'EOF'
+mkdir -p ~/.config/OpenTeam/skills/my-custom-skill
+cat > ~/.config/OpenTeam/skills/my-custom-skill/SKILL.md << 'EOF'
 ---
-name: feishu-doc
-description: Create and manage Feishu documents
+name: my-custom-skill
+description: Your custom skill
 ---
-# Feishu Doc Skill
-Create Feishu documents using lark-cli.
+# My Custom Skill
+Describe what this skill does here.
 EOF
 ```
 
-### Step 7 (Optional): Configure Feishu
+### Step 7: Configure Feishu (**Required**)
+
+Feishu integration is now mandatory. All three steps are required before starting:
 
 ```bash
 lark-cli login
 lark-cli auth check
 export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
 ```
+
+The system will fail to start if any of these are missing.
 
 ## Project Structure
 
