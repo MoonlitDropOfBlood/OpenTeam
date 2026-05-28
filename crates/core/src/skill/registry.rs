@@ -249,27 +249,42 @@ pub fn assistant_skills_dir() -> std::path::PathBuf {
     home_dir().join(".config/OpenTeam/assistant/skills")
 }
 
+/// Get the global agents directory path (~/.config/OpenTeam/agents/)
+pub fn global_agents_dir() -> std::path::PathBuf {
+    home_dir().join(".config/OpenTeam/agents")
+}
+
 /// Built-in skills embedded at compile time, released to global config on startup
 const BUILT_IN_SKILLS: &[(&str, &str, &str)] = &[
     (
         "feishu-doc",
-        "Create and manage Feishu documents",
-        "## Instructions\n\
-         You can create and edit Feishu documents. When asked to write documentation:\n\n\
-         1. Create a new Feishu doc using `lark-cli doc +create --title <title>`\n\
-         2. Write content using Feishu markdown format\n\
-         3. Share the doc link in your response\n\n\
-         ## Commands\n\n\
-         - `lark-cli doc +create --title \"<title>\"` — Create a new document\n\
-         - `lark-cli doc +get --doc-token <token>` — Get document content\n\
-         - `lark-cli doc +update --doc-token <token> --text \"<content>\"` — Update document\n\
-         - `lark-cli doc +search --query \"<query>\"` — Search documents\n\n\
+        "Create and manage Feishu documents and access Feishu MCP tools",
+        "## Available Tools (via Feishu Remote MCP)\n\n\
+         The following tools are available through the standard Feishu MCP service. \
+         They are automatically discovered and don't require separate configuration.\n\n\
+         ### Document Tools\n\
+         - `create-doc` — Create a new cloud document (requires: title)\n\
+         - `fetch-doc` — Read document content (requires: docID)\n\
+         - `search-doc` — Search documents by keyword (requires: query)\n\
+         - `update-doc` — Update document content (requires: docID + content)\n\
+         - `list-docs` — List documents in a knowledge space\n\
+         - `get-comments` — View document comments (requires: docID)\n\
+         - `add-comments` — Add a comment (requires: docID + content)\n\n\
+         ### User Tools\n\
+         - `search-user` — Search for colleagues (requires: query)\n\
+         - `get-user` — Get user details (requires: userID)\n\n\
+         ### File Tools\n\
+         - `fetch-file` — Retrieve file content (requires: fileToken)\n\n\
+         ## Instructions\n\n\
+         You have access to Feishu cloud services via MCP tools. **Always use Feishu cloud documents \
+         instead of local files or markdown when writing documentation, meeting notes, proposals, or any \
+         content that needs to be shared with others.**\n\n\
          ## Best Practices\n\n\
-         1. Always use a clear, descriptive title for new documents\n\
-         2. Use Feishu markdown format for rich content (headings, lists, tables)\n\
-         3. After creating a document, share the doc link with the user\n\
-         4. For long documents, create multiple sections with clear headings\n\
-         5. Review document content before sharing",
+         1. **Cloud-first**: Always use Feishu cloud documents for any content needing sharing\n\
+         2. **Clear titles**: Use descriptive titles so documents can be found via search\n\
+         3. **Share URLs**: After creating a document, share the returned URL with the user\n\
+         4. **Search first**: Search for existing documents before creating new ones\n\
+         5. **Review**: Use `fetch-doc` + `get-comments` to review documents and feedback",
     ),
 ];
 
