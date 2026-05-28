@@ -227,9 +227,14 @@ impl Core {
         tracing::info!("Send queue consumer started (5 QPS)");
 
         // Start Channel Bridge (Node.js plugin with Feishu Channel SDK)
+        // Capture ALL dependencies needed for message processing
         let feishu_bridge = self.feishu_bridge.clone();
         let feishu_app_id = self.feishu_app_id.clone();
         let feishu_app_secret = self.feishu_app_secret.clone();
+        let _feishu_chat_id_for_bridge = self.feishu_chat_id.clone();
+        let assistant = self.assistant.clone();
+        let llm_gateway = self.llm_gateway.clone();
+        let model_config = self.default_model_config.clone();
         let _channel_handle = tokio::spawn(async move {
             tracing::info!("[ChannelBridge] Starting Feishu Channel Bridge...");
 
@@ -247,16 +252,56 @@ impl Core {
                     // Also subscribe to status changes
                     let mut status_rx = channel_bridge.subscribe_status();
 
-                    // Event loop: forward messages and track status
+                    // Event loop: forward messages, process via assistant, reply
                     loop {
                         tokio::select! {
                             Ok(msg) = msg_rx.recv() => {
                                 tracing::info!(
-                                    "[ChannelBridge] Message from {}: {}",
-                                    msg.sender_id,
-                                    &msg.content[..msg.content.len().min(60)],
+                                    "[ChannelBridge] Message from {} (chat: {}, type: {}): {}",
+                                    msg.sender_id, msg.chat_id, msg.chat_type,
+                                    &msg.content[..msg.content.len().min(100)],
                                 );
-                                // Phase 3 V3: route message to MessageRouter
+
+                                // Only process if bot is mentioned or it's a direct message
+                                if msg.mentioned_bot || msg.chat_type == "p2p" {
+                                    if let Some(ref mc) = model_config {
+                                        let mut asst = assistant.lock().await;
+                                        match asst.process_message(
+                                            &msg.content,
+                                            &msg.sender_id,
+                                            &llm_gateway,
+                                            mc,
+                                        ).await {
+                                            Ok(actions) => {
+                                                // Drop assistant lock before calling Feishu API
+                                                drop(asst);
+                                                for action in &actions {
+                                                    match action {
+                                                        assistant::types::AssistantAction::Respond { message } => {
+                                                            tracing::info!("[ChannelBridge] Assistant response: {}",
+                                                                &message[..message.len().min(100)]);
+                                                            let _ = feishu_bridge.reply_to_message(
+                                                                &msg.message_id,
+                                                                message,
+                                                                msg.thread_id.is_some(),
+                                                            ).await;
+                                                        }
+                                                        _ => {
+                                                            tracing::debug!("[ChannelBridge] Action: {:?}", action);
+                                                        }
+                                                    }
+                                                }
+                                            }
+                                            Err(e) => {
+                                                tracing::error!("[ChannelBridge] Assistant error: {e}");
+                                            }
+                                        }
+                                    } else {
+                                        tracing::warn!("[ChannelBridge] No model configured — cannot process message");
+                                    }
+                                } else {
+                                    tracing::debug!("[ChannelBridge] Skipping — bot not mentioned");
+                                }
                             }
                             Ok(_status) = status_rx.changed() => {
                                 let status = status_rx.borrow().clone();
@@ -422,6 +467,8 @@ impl Core {
         // Start scheduler task
         let assistant = self.assistant.clone();
         let default_model_config = self.default_model_config.clone();
+        let feishu_bridge_for_sched = self.feishu_bridge.clone();
+        let feishu_chat_id_for_sched = self.feishu_chat_id.clone();
         let handle = tokio::spawn(async move {
             let mut secs_since_last_summary: u64 = 0;
 
@@ -456,7 +503,17 @@ impl Core {
                                 "[Scheduler] Sending assistant response: {}",
                                 &resp[..resp.len().min(60)]
                             );
-                            // Phase 3 V3: actual Feishu send requires chat_id config
+                            // Send to default chat (no thread context for scheduled responses)
+                            let outgoing = feishu::types::OutgoingMessage {
+                                chat_id: feishu_chat_id_for_sched.clone(),
+                                thread_id: None,
+                                text: resp,
+                                mentions: vec![],
+                                priority: feishu::types::MessagePriority::Secretary,
+                            };
+                            if let Err(e) = feishu_bridge_for_sched.send_message(&outgoing).await {
+                                tracing::error!("[Scheduler] Failed to send response: {e}");
+                            }
                         }
                     }
                 }
