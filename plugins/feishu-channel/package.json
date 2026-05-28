@@ -1,0 +1,10 @@
+{
+  "name": "feishu-channel",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Feishu Channel SDK plugin — WebSocket event subscription + message send/reply via @larksuiteoapi/node-sdk",
+  "main": "index.js",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.63.0"
+  }
+}

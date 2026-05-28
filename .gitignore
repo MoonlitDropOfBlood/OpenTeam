@@ -7,3 +7,5 @@ target/
 *.swp
 *.swo
 *.pdb
+node_modules/
+package-lock.json

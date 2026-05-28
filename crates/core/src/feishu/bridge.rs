@@ -1,19 +1,39 @@
-use std::process::Stdio;
-use std::time::Duration;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, Command};
+use std::sync::Arc;
+use tokio::sync::broadcast;
+use super::channel_bridge::FeishuChannelBridge;
 use super::message_queue::SendQueue;
 use super::types::*;
 use crate::CoreError;
 
+/// FeishuBridge — high-level API for Feishu messaging.
+///
+/// Internally delegates to `FeishuChannelBridge` (IPC with the Node.js Channel SDK plugin).
+///
+/// # Migration from lark-cli
+/// Previously this module spawned `lark-cli` subprocesses directly. Now it communicates
+/// with a Node.js plugin that uses `@larksuiteoapi/node-sdk`'s `createLarkChannel()`.
+/// The `send_queued()` method preserves the 5 QPS rate limiter; all other methods now
+/// call the Channel Bridge instead of `lark-cli`.
 #[derive(Clone)]
 pub struct FeishuBridge {
+    /// The Channel Bridge (IPC to Node.js plugin). Set after `start()`.
+    channel_bridge: Arc<tokio::sync::Mutex<Option<FeishuChannelBridge>>>,
     queue: SendQueue,
 }
 
 impl FeishuBridge {
     pub fn new() -> Self {
-        Self { queue: SendQueue::new() }
+        Self {
+            channel_bridge: Arc::new(tokio::sync::Mutex::new(None)),
+            queue: SendQueue::new(),
+        }
+    }
+
+    /// Register the Channel Bridge after the plugin has been started.
+    pub async fn set_channel_bridge(&self, bridge: FeishuChannelBridge) {
+        let mut guard = self.channel_bridge.lock().await;
+        *guard = Some(bridge);
+        tracing::info!("[FeishuBridge] Channel Bridge registered");
     }
 
     pub fn queue(&self) -> &SendQueue {
@@ -25,158 +45,85 @@ impl FeishuBridge {
         format!(r#"<at user_id="{}">{}</at>"#, target.user_id, target.name)
     }
 
-    /// Send a text message to a Feishu group chat
+    /// Send a text message to a Feishu group chat (via Channel Bridge).
     pub async fn send_message(&self, msg: &OutgoingMessage) -> Result<MessageId, CoreError> {
-        let mut text = msg.text.clone();
-
-        // Prepend @mentions
-        for mention in &msg.mentions {
-            text = format!("{} {}",
-                Self::format_mention(mention),
-                text
-            );
-        }
-
-        let mut cmd = Command::new("lark-cli");
-        cmd.arg("im")
-            .arg("+messages-send")
-            .arg("--chat-id")
-            .arg(&msg.chat_id)
-            .arg("--text")
-            .arg(&text);
-
-        let output = tokio::time::timeout(
-            Duration::from_secs(30),
-            cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output(),
-        )
-        .await
-        .map_err(|_| CoreError::Feishu("send_message timed out after 30s".into()))?
-        .map_err(|e| CoreError::Feishu(format!("Failed to run lark-cli: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(CoreError::Feishu(format!("lark-cli error: {}", stderr)));
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let message_id = stdout.trim().to_string();
-        if message_id.is_empty() {
-            return Err(CoreError::Feishu("lark-cli returned empty message ID".into()));
-        }
-        Ok(message_id)
+        let guard = self.channel_bridge.lock().await;
+        let bridge = guard.as_ref()
+            .ok_or_else(|| CoreError::Feishu("Channel Bridge not initialized — call start() first".into()))?;
+        bridge.send_message(msg).await
     }
 
-    /// Reply to a message in a thread
+    /// Reply to a message in a thread (via Channel Bridge).
     pub async fn reply_to_message(
         &self,
         message_id: &str,
         text: &str,
         reply_in_thread: bool,
     ) -> Result<MessageId, CoreError> {
-        let mut cmd = Command::new("lark-cli");
-        cmd.arg("im")
-            .arg("+messages-reply")
-            .arg("--message-id")
-            .arg(message_id)
-            .arg("--text")
-            .arg(text);
-
-        if reply_in_thread {
-            cmd.arg("--reply-in-thread");
-        }
-
-        let output = tokio::time::timeout(
-            Duration::from_secs(30),
-            cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).output(),
-        )
-        .await
-        .map_err(|_| CoreError::Feishu("reply_to_message timed out after 30s".into()))?
-        .map_err(|e| CoreError::Feishu(format!("Failed to reply: {}", e)))?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(CoreError::Feishu(format!("lark-cli reply error: {}", stderr)));
-        }
-
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        let guard = self.channel_bridge.lock().await;
+        let bridge = guard.as_ref()
+            .ok_or_else(|| CoreError::Feishu("Channel Bridge not initialized".into()))?;
+        bridge.reply_to_message(message_id, text, reply_in_thread).await
     }
 
-    /// Check Feishu CLI auth status
+    /// Check Feishu connection status (via Channel Bridge).
     pub async fn check_auth(&self) -> Result<bool, CoreError> {
-        let output = tokio::time::timeout(
-            Duration::from_secs(10),
-            Command::new("lark-cli")
-                .arg("auth")
-                .arg("check")
-                .output(),
-        )
-        .await
-        .map_err(|_| CoreError::Feishu("check_auth timed out after 10s".into()))?
-        .map_err(|e| CoreError::Feishu(format!("Auth check failed: {}", e)))?;
-
-        Ok(output.status.success())
+        let guard = self.channel_bridge.lock().await;
+        if let Some(bridge) = guard.as_ref() {
+            bridge.check_connection().await
+        } else {
+            Ok(false)
+        }
     }
 
-    /// Start consuming events from Feishu WebSocket
-    /// Returns the child process handle (caller must manage lifecycle)
+    /// Subscribe to incoming Feishu messages (via Channel Bridge).
+    pub fn subscribe_messages(&self) -> Option<broadcast::Receiver<NormalizedMessage>> {
+        let guard = self.channel_bridge.try_lock().ok()?;
+        guard.as_ref().map(|b| b.subscribe_messages())
+    }
+
+    /// Start consuming events from Feishu via Channel SDK WebSocket.
+    ///
+    /// This replaces the old `lark-cli event +subscribe` subprocess approach.
+    /// The Channel Bridge manages the WebSocket connection internally.
     pub async fn subscribe_events(
         &self,
-        event_types: &[&str],
-    ) -> Result<Child, CoreError> {
-        let mut cmd = Command::new("lark-cli");
-        cmd.arg("event")
-            .arg("+subscribe")
-            .arg("--event-types")
-            .arg(event_types.join(","))
-            .arg("--compact")
-            .arg("--quiet")
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-
-        let child = cmd.spawn()
-            .map_err(|e| CoreError::Feishu(format!("Failed to subscribe events: {}", e)))?;
-
-        Ok(child)
+        _event_types: &[&str],
+    ) -> Result<(), CoreError> {
+        // Events are automatically subscribed when the Channel Bridge connects.
+        // The Channel SDK subscribes to `im.message.receive_v1` by default.
+        tracing::info!("[FeishuBridge] Events handled by Channel Bridge (no-op)");
+        Ok(())
     }
 
-    /// Read next NDJSON line from event subscription output
-    pub async fn read_event(
-        reader: &mut BufReader<tokio::process::ChildStdout>,
-    ) -> Option<String> {
-        let mut line = String::new();
-        reader.read_line(&mut line).await.ok()?;
-        if line.trim().is_empty() {
-            None
-        } else {
-            Some(line)
-        }
+    /// Read next event from event subscription (DEPRECATED — use subscribe_messages() instead).
+    ///
+    /// This was previously used with the lark-cli subprocess stdout reader.
+    /// With the Channel Bridge, incoming messages are pushed via broadcast channel.
+    pub async fn read_event(_reader: &mut ()) -> Option<String> {
+        None
     }
 
-    /// Parse event JSON to extract message content
-    pub fn parse_message_event(json: &str) -> Result<FeishuMessage, CoreError> {
-        let value: serde_json::Value = serde_json::from_str(json)
-            .map_err(|e| CoreError::Feishu(format!("Event parse error: {}", e)))?;
-
-        let event = &value["event"];
-        let message = &event["message"];
-
-        Ok(FeishuMessage {
-            message_id: message["message_id"].as_str().unwrap_or("").to_string(),
-            chat_id: message["chat_id"].as_str().unwrap_or("").to_string(),
-            thread_id: message["thread_id"].as_str().map(|s| s.to_string()),
-            sender: SenderInfo {
-                id: event["sender"]["sender_id"]["user_id"].as_str().unwrap_or("").to_string(),
-                name: event["sender"]["name"].as_str().unwrap_or("").to_string(),
-            },
-            content: message["body"]["content"].as_str().unwrap_or("").to_string(),
-            msg_type: message["msg_type"].as_str().unwrap_or("").to_string(),
-        })
+    /// Parse event JSON to extract message content (DEPRECATED).
+    ///
+    /// With the Channel Bridge, messages are already parsed into `NormalizedMessage`.
+    pub fn parse_message_event(_json: &str) -> Result<FeishuMessage, CoreError> {
+        Err(CoreError::Feishu("parse_message_event deprecated — use Channel Bridge subscribe_messages()".into()))
     }
 
-    /// Send a message through the queue (respects 5 QPS)
-    pub async fn send_queued(&self, msg: OutgoingMessage, agent_id: &str) -> Result<MessageId, CoreError> {
+    /// Send a message through the queue (respects 5 QPS).
+    pub async fn send_queued(
+        &self,
+        msg: OutgoingMessage,
+        agent_id: &str,
+    ) -> Result<MessageId, CoreError> {
         self.queue.enqueue(msg, agent_id.to_string()).await;
-        // Return a placeholder ID — real ID comes after send
         Ok("queued".into())
+    }
+}
+
+impl Default for FeishuBridge {
+    fn default() -> Self {
+        Self::new()
     }
 }
