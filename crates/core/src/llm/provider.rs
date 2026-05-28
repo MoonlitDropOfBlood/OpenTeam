@@ -160,7 +160,7 @@ impl ProviderResolver {
             base_url,
             api_key,
             api_key_is_direct,
-            max_tokens: config.max_tokens,
+            max_tokens,
             timeout_secs,
             chunk_timeout_secs,
             set_cache_key,
