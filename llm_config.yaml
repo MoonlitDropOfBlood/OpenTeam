@@ -1,3 +1,52 @@
+# Provider configurations — primary config format (OpenCode-compatible)
+# Each provider has default options that apply to all its models.
+# Models inherit baseURL, apiKey env, and timeout from their provider.
+provider:
+  anthropic:
+    name: "Anthropic"
+    env: ["ANTHROPIC_API_KEY"]
+    options:
+      baseURL: https://api.anthropic.com/v1
+      timeout: 300000
+      setCacheKey: true
+    models:
+      claude-sonnet-4-20250514:
+        name: "Claude Sonnet 4"
+        limit: { context: 200000, output: 50000 }
+
+  deepseek:
+    name: "DeepSeek"
+    env: ["DEEPSEEK_API_KEY"]
+    options:
+      baseURL: https://api.deepseek.com/v1
+      timeout: 300000
+    models:
+      deepseek-v4-pro:
+        name: "DeepSeek V4 Pro"
+        limit: { context: 64000, output: 8192 }
+      deepseek-v4-flash:
+        name: "DeepSeek V4 Flash"
+        limit: { context: 64000, output: 8192 }
+
+  openai:
+    name: "OpenAI"
+    env: ["OPENAI_API_KEY"]
+    options:
+      baseURL: https://api.openai.com/v1
+      timeout: 300000
+    models:
+      gpt-4o:
+        name: "GPT 4o"
+        limit: { context: 128000, output: 4096 }
+
+  ollama:
+    name: "Ollama (local)"
+    options:
+      baseURL: http://localhost:11434/api
+      timeout: 60000
+
+# Legacy model pool (kept for backward compatibility)
+# New configs should use the `provider:` section above instead.
 models:
   claude-sonnet-4:
     model: anthropic/claude-sonnet-4-20250514

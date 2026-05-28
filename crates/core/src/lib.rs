@@ -32,6 +32,7 @@ pub struct Core {
     pub plugin_manager: plugin::manager::PluginManager,
     pub skill_registry: Arc<RwLock<skill::registry::SkillRegistry>>,
     pub mcp_registry: Arc<RwLock<mcp::registry::McpRegistry>>,
+    pub provider_resolver: llm::provider::ProviderResolver,
     scheduler_handle: Option<JoinHandle<()>>,
     watcher_handle: Option<JoinHandle<()>>,
     mcp_watcher_handle: Option<JoinHandle<()>>,
@@ -45,6 +46,7 @@ impl Core {
         memory_db_path: &str,
     ) -> Result<Self, CoreError> {
         let llm_config = config::load_llm_config(llm_config_path)?;
+        let provider_resolver = llm::provider::ProviderResolver::new(llm_config.provider.clone());
         let mut registry = registry::AgentRegistry::new();
         let configs = config::load_all_agents(agents_dir)?;
         for cfg in configs {
@@ -164,7 +166,7 @@ impl Core {
 
         Ok(Self {
             registry,
-            llm_gateway: llm::gateway::LlmGateway::new(llm_config),
+            llm_gateway: llm::gateway::LlmGateway::new(llm_config, provider_resolver.clone()),
             feishu_bridge,
             feishu_chat_id,
             default_model_config,
@@ -173,6 +175,7 @@ impl Core {
             router,
             assistant,
             plugin_manager,
+            provider_resolver,
             skill_registry,
             mcp_registry,
             scheduler_handle: None,

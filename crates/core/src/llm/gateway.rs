@@ -3,6 +3,7 @@ use std::time::Duration;
 use crate::config::agent::ModelConfig;
 use crate::config::llm::LlmConfig;
 use crate::CoreError;
+use super::provider::ProviderResolver;
 use super::rate_limiter::RateLimiter;
 
 #[derive(Clone)]
@@ -10,6 +11,7 @@ pub struct LlmGateway {
     client: reqwest::Client,
     models: HashMap<String, ModelConfig>,
     rate_limiters: HashMap<String, RateLimiter>,
+    provider_resolver: ProviderResolver,
 }
 
 #[derive(Debug, Clone)]
@@ -67,7 +69,7 @@ pub struct TokenUsage {
 }
 
 impl LlmGateway {
-    pub fn new(config: LlmConfig) -> Self {
+    pub fn new(config: LlmConfig, provider_resolver: ProviderResolver) -> Self {
         let skip_verify = config.models.values().any(|m| m.skip_verify_ssl.unwrap_or(false));
 
         let mut client_builder = reqwest::Client::builder()
@@ -80,9 +82,10 @@ impl LlmGateway {
         let client = client_builder.build().unwrap();
 
         let mut rate_limiters = HashMap::new();
-        for (name, model_config) in &config.models {
+        for (_, model_config) in &config.models {
             if let Some(rate) = &model_config.rate_limit {
-                rate_limiters.insert(name.clone(), RateLimiter::new(rate.rpm));
+                let key = format!("{}/{}", model_config.provider(), model_config.model_name());
+                rate_limiters.insert(key, RateLimiter::new(rate.rpm));
             }
         }
 
@@ -90,6 +93,7 @@ impl LlmGateway {
             client,
             models: config.models,
             rate_limiters,
+            provider_resolver,
         }
     }
 
@@ -98,16 +102,33 @@ impl LlmGateway {
         self.models.get(name)
     }
 
-    /// Chat using a ModelConfig directly (from agent's embedded config or global pool)
+    /// Resolve a ModelConfig through the provider resolution chain
+    pub fn resolve_model(&self, config: &ModelConfig) -> super::provider::ResolvedModel {
+        self.provider_resolver.resolve(config)
+    }
+
+    /// Chat using a ModelConfig directly (from agent's embedded config or global pool).
+    /// Uses ProviderResolver to resolve the full endpoint, keys, headers, and params.
     pub async fn chat(
         &self,
         model_config: &ModelConfig,
         request: &ChatRequest,
     ) -> Result<ChatResponse, CoreError> {
-        // Rate limit
-        if let Some(limiter) = self.rate_limiters.get(&request.model) {
+        let resolved = self.resolve_model(model_config);
+
+        // Rate limit using resolved rate_limiter_key
+        if let Some(limiter) = self.rate_limiters.get(&resolved.rate_limiter_key) {
             limiter.acquire().await;
         }
+
+        // Resolve API key
+        let api_key = if resolved.api_key_is_direct {
+            resolved.api_key.clone()
+        } else {
+            let env_val = std::env::var(&resolved.api_key)
+                .map_err(|_| CoreError::Llm(format!("{} not set", resolved.api_key)))?;
+            env_val
+        };
 
         let max_retries = model_config.max_retries.unwrap_or(0);
         let mut last_error = None;
@@ -118,22 +139,21 @@ impl LlmGateway {
                     "Retry attempt {}/{} for {}",
                     attempt,
                     max_retries,
-                    model_config.model
+                    resolved.api_model
                 );
                 tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
             }
 
-            let result = match model_config.provider() {
-                "anthropic" => self.call_anthropic(model_config, request).await,
-                "ollama" => self.call_ollama(model_config, request).await,
-                "deepseek" | "openai" => self.call_openai_compat(model_config, request).await,
+            let result = match resolved.provider.as_str() {
+                "anthropic" => self.call_anthropic_resolved(&resolved, &api_key, request).await,
+                "ollama" => self.call_ollama_resolved(&resolved, &api_key, request).await,
+                "deepseek" | "openai" => self.call_openai_compat_resolved(&resolved, &api_key, request).await,
                 provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
             };
 
             match result {
                 Ok(resp) => return Ok(resp),
                 Err(e) => {
-                    // Don't retry on auth or bad request errors
                     let err_str = e.to_string();
                     if err_str.contains("401")
                         || err_str.contains("403")
@@ -150,38 +170,33 @@ impl LlmGateway {
         Err(last_error.unwrap_or_else(|| CoreError::Llm("Max retries exceeded".into())))
     }
 
-    async fn call_anthropic(
+    async fn call_anthropic_resolved(
         &self,
-        config: &ModelConfig,
+        resolved: &super::provider::ResolvedModel,
+        api_key: &str,
         request: &ChatRequest,
     ) -> Result<ChatResponse, CoreError> {
-        let api_key = std::env::var(
-            config.api_key_env.as_deref().unwrap_or("ANTHROPIC_API_KEY"),
-        )
-        .map_err(|_| CoreError::Llm("ANTHROPIC_API_KEY not set".into()))?;
+        let endpoint = format!("{}/messages", resolved.base_url.trim_end_matches('/'));
 
-        // Build messages array — support both plain text and structured content blocks
         let messages: Vec<serde_json::Value> = request.messages.iter().map(|m| {
             match serde_json::from_str::<serde_json::Value>(&m.content) {
                 Ok(serde_json::Value::Array(_)) => {
-                    // Already structured content blocks (tool_result, tool_use)
                     serde_json::json!({"role": m.role, "content": serde_json::from_str::<serde_json::Value>(&m.content).unwrap()})
                 }
                 _ => {
-                    // Plain text message
                     serde_json::json!({"role": m.role, "content": m.content})
                 }
             }
         }).collect();
 
         let mut body = serde_json::json!({
-            "model": config.model_name(),
-            "max_tokens": config.max_tokens,
+            "model": resolved.api_model,
+            "max_tokens": resolved.max_tokens,
             "system": request.system_prompt,
             "messages": messages,
         });
 
-        // Add tools if present
+        // Tools
         if !request.tools.is_empty() {
             let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
                 serde_json::json!({
@@ -193,48 +208,64 @@ impl LlmGateway {
             body["tools"] = serde_json::json!(tools);
         }
 
-        // Optional params for Anthropic
-        if let Some(temp) = config.temperature {
+        // Optional params
+        if let Some(temp) = resolved.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(top_p) = config.top_p {
+        if let Some(top_p) = resolved.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
-        if let Some(top_k) = config.top_k {
+        if let Some(top_k) = resolved.top_k {
             body["top_k"] = serde_json::json!(top_k);
         }
-        if let Some(stop) = &config.stop {
+        if let Some(stop) = &resolved.stop {
             body["stop_sequences"] = serde_json::json!(stop);
         }
-        if let Some(effort) = &config.reasoning_effort {
-            let budget_tokens = match effort.as_str() {
-                "low" => 1024,
-                "medium" => 2048,
-                "high" => 4096,
-                _ => 2048,
-            };
-            body["thinking"] = serde_json::json!({
-                "type": "enabled",
-                "budget_tokens": budget_tokens,
-            });
+
+        // Reasoning/thinking
+        if resolved.can_reason {
+            if let Some(effort) = &resolved.reasoning_effort {
+                let budget_tokens = (resolved.max_tokens as f64 * match effort.as_str() {
+                    "low" => 0.5,
+                    "medium" => 0.7,
+                    "high" => 0.9,
+                    _ => 0.7,
+                }) as u64;
+                body["thinking"] = serde_json::json!({
+                    "type": "enabled",
+                    "budget_tokens": budget_tokens,
+                });
+                body["temperature"] = serde_json::json!(1);
+            }
         }
 
-        let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
-        let response = tokio::time::timeout(
-            timeout,
-            self.client
-                .post("https://api.anthropic.com/v1/messages")
-                .header("x-api-key", &api_key)
-                .header("anthropic-version", "2023-06-01")
-                .json(&body)
-                .send(),
-        )
-        .await
-        .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
+        // Prompt caching
+        if resolved.set_cache_key && request.system_prompt.len() > 1000 {
+            if let Some(sys) = body["system"].as_str() {
+                body["system"] = serde_json::json!([
+                    {"type": "text", "text": sys, "cache_control": {"type": "ephemeral"}}
+                ]);
+            }
+        }
+
+        let timeout = std::time::Duration::from_secs(resolved.timeout_secs);
+        let mut req = self.client
+            .post(&endpoint)
+            .header("x-api-key", api_key)
+            .header("anthropic-version", "2023-06-01");
+
+        // Custom headers
+        for (key, value) in &resolved.headers {
+            req = req.header(key.as_str(), value.as_str());
+        }
+
+        let response = tokio::time::timeout(timeout, req.json(&body).send())
+            .await
+            .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
 
         let json: serde_json::Value = response.json().await?;
 
-        // Parse content blocks — extract text and tool_use
+        // Parse content blocks
         let mut text_content = String::new();
         let mut tool_calls = Vec::new();
 
@@ -258,7 +289,6 @@ impl LlmGateway {
             }
         }
 
-        // Fallback for older API format or simple text responses
         if text_content.is_empty() && tool_calls.is_empty() {
             text_content = json["content"][0]["text"]
                 .as_str()
@@ -273,20 +303,20 @@ impl LlmGateway {
             content: text_content,
             tool_calls,
             reasoning_content: None,
-            usage: TokenUsage {
-                input_tokens,
-                output_tokens,
-            },
+            usage: TokenUsage { input_tokens, output_tokens },
         })
     }
 
-    async fn call_ollama(
+    async fn call_ollama_resolved(
         &self,
-        config: &ModelConfig,
+        resolved: &super::provider::ResolvedModel,
+        _api_key: &str,
         request: &ChatRequest,
     ) -> Result<ChatResponse, CoreError> {
+        let endpoint = format!("{}/chat", resolved.base_url.trim_end_matches('/'));
+
         let mut body = serde_json::json!({
-            "model": config.model_name(),
+            "model": resolved.api_model,
             "system": request.system_prompt,
             "messages": request.messages.iter().map(|m| {
                 serde_json::json!({"role": m.role, "content": m.content})
@@ -294,25 +324,20 @@ impl LlmGateway {
             "stream": false,
         });
 
-        // Optional params for Ollama
-        if let Some(temp) = config.temperature {
+        if let Some(temp) = resolved.temperature {
             body["temperature"] = serde_json::json!(temp);
         }
-        if let Some(top_p) = config.top_p {
+        if let Some(top_p) = resolved.top_p {
             body["top_p"] = serde_json::json!(top_p);
         }
-        if let Some(stop) = &config.stop {
+        if let Some(stop) = &resolved.stop {
             body["stop"] = serde_json::json!(stop);
         }
 
-        let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(60));
-
+        let timeout = std::time::Duration::from_secs(resolved.timeout_secs);
         let response = tokio::time::timeout(
             timeout,
-            self.client
-                .post("http://localhost:11434/api/chat")
-                .json(&body)
-                .send(),
+            self.client.post(&endpoint).json(&body).send(),
         )
         .await
         .map_err(|e| CoreError::Llm(format!("Ollama timeout: {}", e)))??;
@@ -327,31 +352,18 @@ impl LlmGateway {
             content,
             tool_calls: vec![],
             reasoning_content: None,
-            usage: TokenUsage {
-                input_tokens: 0,
-                output_tokens: 0,
-            },
+            usage: TokenUsage { input_tokens: 0, output_tokens: 0 },
         })
     }
 
-/// Generic OpenAI-compatible API caller. Supports any provider with a compatible endpoint.
-async fn call_openai_compat(
-    &self,
-    config: &ModelConfig,
-    request: &ChatRequest,
-) -> Result<ChatResponse, CoreError> {
-    let api_key_env = config.api_key_env.as_deref().unwrap_or("OPENAI_API_KEY");
-    let api_key = std::env::var(api_key_env)
-        .map_err(|_| CoreError::Llm(format!("{} not set", api_key_env)))?;
+    async fn call_openai_compat_resolved(
+        &self,
+        resolved: &super::provider::ResolvedModel,
+        api_key: &str,
+        request: &ChatRequest,
+    ) -> Result<ChatResponse, CoreError> {
+        let endpoint = format!("{}/chat/completions", resolved.base_url.trim_end_matches('/'));
 
-    // Resolve API endpoint: base_url from config, or default per provider
-    let api_endpoint = config.base_url.clone().unwrap_or_else(|| {
-        match config.provider() {
-            "deepseek" => "https://api.deepseek.com/v1/chat/completions".to_string(),
-            "openai" => "https://api.openai.com/v1/chat/completions".to_string(),
-            _ => "https://api.openai.com/v1/chat/completions".to_string(), // generic fallback
-        }
-    });
         let mut all_messages: Vec<serde_json::Value> = vec![
             serde_json::json!({"role": "system", "content": request.system_prompt}),
         ];
@@ -360,12 +372,25 @@ async fn call_openai_compat(
         }));
 
         let mut body = serde_json::json!({
-            "model": config.model_name(),
-            "max_tokens": config.max_tokens,
+            "model": resolved.api_model,
+            "max_tokens": resolved.max_tokens,
             "messages": all_messages,
         });
 
-        // Add tools if present
+        // Preserve reasoning_content from previous turns (DeepSeek thinking mode)
+        for msg in &request.messages {
+            if let Some(ref rc) = msg.reasoning_content {
+                if let Some(arr) = body["messages"].as_array_mut() {
+                    for m in arr.iter_mut() {
+                        if m["role"] == "assistant" && m["content"] == msg.content {
+                            m["reasoning_content"] = serde_json::json!(rc);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Tools
         if !request.tools.is_empty() {
             let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
                 serde_json::json!({
@@ -381,63 +406,63 @@ async fn call_openai_compat(
             body["tool_choice"] = serde_json::json!("auto");
         }
 
-        // Preserve reasoning_content from previous turns (DeepSeek thinking mode)
-        for msg in &request.messages {
-            if let Some(ref rc) = msg.reasoning_content {
-                if let Some(arr) = body["messages"].as_array_mut() {
-                    for m in arr.iter_mut() {
-                        if m["role"] == "assistant" && m["content"] == msg.content {
-                            m["reasoning_content"] = serde_json::json!(rc);
-                        }
-                    }
-                }
+        // Optional params
+        if let Some(temp) = resolved.temperature {
+            body["temperature"] = serde_json::json!(temp);
+        }
+        if let Some(top_p) = resolved.top_p {
+            body["top_p"] = serde_json::json!(top_p);
+        }
+        if let Some(top_k) = resolved.top_k {
+            if resolved.provider != "openai" {
+                body["top_k"] = serde_json::json!(top_k);
+            }
+        }
+        if let Some(stop) = &resolved.stop {
+            body["stop"] = serde_json::json!(stop);
+        }
+        if let Some(pp) = resolved.presence_penalty {
+            body["presence_penalty"] = serde_json::json!(pp);
+        }
+        if let Some(fp) = resolved.frequency_penalty {
+            body["frequency_penalty"] = serde_json::json!(fp);
+        }
+
+        // Reasoning/thinking
+        if resolved.can_reason {
+            if let Some(effort) = &resolved.reasoning_effort {
+                body["reasoning_effort"] = serde_json::json!(effort);
             }
         }
 
-        // Optional params for OpenAI-compatible API
-        if let Some(temp) = config.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = config.top_p {
-            body["top_p"] = serde_json::json!(top_p);
-        }
-        if let Some(top_k) = config.top_k {
-            body["top_k"] = serde_json::json!(top_k);
-        }
-        if let Some(stop) = &config.stop {
-            body["stop"] = serde_json::json!(stop);
-        }
-        if let Some(pp) = config.presence_penalty {
-            body["presence_penalty"] = serde_json::json!(pp);
-        }
-        if let Some(fp) = config.frequency_penalty {
-            body["frequency_penalty"] = serde_json::json!(fp);
-        }
-        // DeepSeek thinking mode: when enabled, temperature must be 1
-        if let Some(thinking) = config.thinking {
+        // DeepSeek thinking mode
+        if let Some(thinking) = resolved.thinking {
             if thinking {
-                if config.temperature.map_or(false, |t| (t - 1.0).abs() > 0.01) {
-                    tracing::warn!("Model {}: thinking mode forces temperature=1, overriding configured value", config.model);
-                }
                 body["temperature"] = serde_json::json!(1);
             }
         }
 
-        let timeout = Duration::from_secs(config.timeout_secs.unwrap_or(120));
-        let response = tokio::time::timeout(
-            timeout,
-            self.client
-                .post(&api_endpoint)
-                .header("Authorization", format!("Bearer {}", api_key))
-                .json(&body)
-                .send(),
-        )
-        .await
-        .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
+        let timeout = std::time::Duration::from_secs(resolved.timeout_secs);
+        let mut req = self.client
+            .post(&endpoint)
+            .header("Authorization", format!("Bearer {}", api_key));
+
+        // Cache key header
+        if resolved.set_cache_key {
+            req = req.header("x-cache-key", format!("{}:{}", resolved.provider, resolved.api_model));
+        }
+
+        // Custom headers
+        for (key, value) in &resolved.headers {
+            req = req.header(key.as_str(), value.as_str());
+        }
+
+        let response = tokio::time::timeout(timeout, req.json(&body).send())
+            .await
+            .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
 
         let json: serde_json::Value = response.json().await?;
 
-        // Parse OpenAI-compatible response
         let choice = &json["choices"][0];
         let message = &choice["message"];
         let content = message["content"].as_str().unwrap_or("").to_string();
@@ -463,10 +488,7 @@ async fn call_openai_compat(
             content,
             tool_calls,
             reasoning_content: message["reasoning_content"].as_str().map(|s| s.to_string()),
-            usage: TokenUsage {
-                input_tokens,
-                output_tokens,
-            },
+            usage: TokenUsage { input_tokens, output_tokens },
         })
     }
 }

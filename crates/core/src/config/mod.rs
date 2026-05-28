@@ -1,5 +1,6 @@
 pub mod agent;
 pub mod llm;
+pub mod provider;
 
 use std::path::Path;
 use crate::CoreError;
@@ -89,5 +90,106 @@ triggers: []"#;
         assert_eq!(configs[0].name, "test-agent");
 
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn test_model_resolution_from_yaml() {
+        use crate::llm::provider::ProviderResolver;
+
+        let resolver = ProviderResolver::new(std::collections::HashMap::new());
+        let yaml = r#"
+name: "test-agent"
+role: "test"
+llm:
+  primary:
+    model: deepseek/deepseek-v4-flash
+    max_tokens: 8192
+triggers: []
+"#;
+        let config: crate::config::agent::AgentConfig = serde_yaml::from_str(yaml).unwrap();
+        let resolved = resolver.resolve(&config.llm.primary);
+
+        assert_eq!(resolved.provider, "deepseek");
+        assert_eq!(resolved.base_url, "https://api.deepseek.com/v1");
+        assert!(resolved.can_reason);
+        assert_eq!(resolved.rate_limiter_key, "deepseek/deepseek-v4-flash");
+    }
+
+    #[test]
+    fn test_model_resolution_with_yaml_provider_override() {
+        use crate::config::provider::{ProviderConfig, ProviderOptions};
+        use crate::llm::provider::ProviderResolver;
+
+        let mut provider_configs = std::collections::HashMap::new();
+        provider_configs.insert("deepseek".to_string(), ProviderConfig {
+            name: Some("Custom DeepSeek".into()),
+            npm: None,
+            env: vec![],
+            whitelist: None,
+            blacklist: None,
+            options: ProviderOptions {
+                base_url: Some("https://custom-deepseek.com/v1".into()),
+                timeout: Some(120000),
+                ..Default::default()
+            },
+            models: std::collections::HashMap::new(),
+        });
+
+        let resolver = ProviderResolver::new(provider_configs);
+        let yaml = r#"
+name: "test"
+role: "test"
+llm:
+  primary:
+    model: deepseek/deepseek-v4-pro
+    max_tokens: 4096
+triggers: []
+"#;
+        let config: crate::config::agent::AgentConfig = serde_yaml::from_str(yaml).unwrap();
+        let resolved = resolver.resolve(&config.llm.primary);
+
+        assert_eq!(resolved.base_url, "https://custom-deepseek.com/v1");
+        assert_eq!(resolved.timeout_secs, 120); // 120000ms → 120s
+        assert_eq!(resolved.max_tokens, 4096);
+    }
+
+    #[test]
+    fn test_model_resolution_ollama_yaml() {
+        use crate::llm::provider::ProviderResolver;
+
+        let resolver = ProviderResolver::new(std::collections::HashMap::new());
+        let yaml = r#"
+name: "test"
+role: "test"
+llm:
+  primary:
+    model: ollama/qwen2.5:3b
+    max_tokens: 4096
+triggers: []
+"#;
+        let config: crate::config::agent::AgentConfig = serde_yaml::from_str(yaml).unwrap();
+        let resolved = resolver.resolve(&config.llm.primary);
+
+        assert_eq!(resolved.provider, "ollama");
+        assert_eq!(resolved.base_url, "http://localhost:11434/api");
+        assert_eq!(resolved.timeout_secs, 60); // 60000ms → 60s
+        assert!(!resolved.can_reason);
+    }
+
+    #[test]
+    fn test_load_llm_config_with_provider_section() {
+        let config_path = std::path::Path::new("llm_config.yaml");
+        if !config_path.exists() {
+            eprintln!("llm_config.yaml not found at {:?}, skipping test", config_path);
+            return;
+        }
+        let config = crate::config::load_llm_config(config_path).unwrap();
+
+        assert!(config.provider.contains_key("anthropic"), "llm_config.yaml should have anthropic provider");
+        assert!(config.provider.contains_key("deepseek"), "llm_config.yaml should have deepseek provider");
+        assert!(config.provider.contains_key("openai"), "llm_config.yaml should have openai provider");
+        assert!(config.provider.contains_key("ollama"), "llm_config.yaml should have ollama provider");
+
+        assert!(config.models.contains_key("claude-sonnet-4"), "llm_config.yaml should have legacy models");
     }
 }
