@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 use serde::{Deserialize, Serialize};
 use crate::CoreError;
 
@@ -78,6 +79,15 @@ pub fn load_mcp_configs(path: &Path) -> Result<Vec<McpServerConfig>, CoreError> 
     Ok(configs)
 }
 
+/// Register the Feishu token manager for dynamic TAT resolution in HTTP headers.
+/// Called once at startup. The token manager is stored in a global OnceLock.
+pub fn register_feishu_token_manager(tm: crate::feishu::token::FeishuTokenManager) {
+    let _ = FEISHU_TOKEN_MANAGER.set(tm);
+}
+
+/// Global Feishu token manager for dynamic `${FEISHU_TAT}` header resolution.
+static FEISHU_TOKEN_MANAGER: OnceLock<crate::feishu::token::FeishuTokenManager> = OnceLock::new();
+
 /// Send a JSON-RPC request to an MCP server (supports both stdio and HTTP transport)
 pub async fn send_jsonrpc(
     config: &McpServerConfig,
@@ -100,7 +110,20 @@ pub async fn send_jsonrpc(
 
         let mut req = client.post(url).json(&request);
         for (key, val) in &config.entry.headers {
-            let resolved = resolve_env(val);
+            let resolved = if val == "${FEISHU_TAT}" {
+                // Dynamically resolve Feishu Tenant Access Token
+                match FEISHU_TOKEN_MANAGER.get() {
+                    Some(tm) => tm.get_token().await.map_err(|e| {
+                        CoreError::Mcp(format!("Feishu TAT: {e}"))
+                    })?,
+                    None => {
+                        tracing::warn!("FEISHU_TAT requested but no token manager registered");
+                        String::new()
+                    }
+                }
+            } else {
+                resolve_env(val)
+            };
             req = req.header(key, resolved);
         }
         let resp = req.send().await

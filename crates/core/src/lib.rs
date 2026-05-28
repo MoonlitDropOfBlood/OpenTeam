@@ -13,7 +13,6 @@ pub mod mcp;
 
 use std::path::Path;
 use std::sync::Arc;
-use tokio::io::AsyncBufReadExt;
 use tokio::sync::{Mutex, RwLock};
 use tokio::task::JoinHandle;
 
@@ -23,6 +22,8 @@ pub struct Core {
     pub registry: registry::AgentRegistry,
     pub llm_gateway: llm::gateway::LlmGateway,
     pub feishu_bridge: feishu::bridge::FeishuBridge,
+    pub feishu_app_id: String,
+    pub feishu_app_secret: String,
     pub feishu_chat_id: String,
     pub default_model_config: Option<config::agent::ModelConfig>,
     pub memory_store: Arc<memory::store::MemoryStore>,
@@ -63,7 +64,20 @@ impl Core {
 
         // === Feishu mandatory validation ===
 
-        // 1. Check FEISHU_CHAT_ID env var — must be set
+        // 1. Check FEISHU_APP_ID and FEISHU_APP_SECRET env vars — must be set
+        let feishu_app_id = std::env::var("FEISHU_APP_ID")
+            .map_err(|_| CoreError::Config(
+                "FEISHU_APP_ID environment variable must be set. \
+                 Get it from the Feishu Developer Console.".into()
+            ))?;
+        let feishu_app_secret = std::env::var("FEISHU_APP_SECRET")
+            .map_err(|_| CoreError::Config(
+                "FEISHU_APP_SECRET environment variable must be set. \
+                 Get it from the Feishu Developer Console.".into()
+            ))?;
+        tracing::info!("Feishu credentials configured (app_id: {})", &feishu_app_id[..8]);
+
+        // 2. Check FEISHU_CHAT_ID env var — must be set
         let feishu_chat_id = std::env::var("FEISHU_CHAT_ID")
             .map_err(|_| CoreError::Config(
                 "FEISHU_CHAT_ID environment variable must be set. \
@@ -71,34 +85,8 @@ impl Core {
             ))?;
         tracing::info!("Feishu chat_id: {}", feishu_chat_id);
 
-        // 2. Check lark-cli is available in PATH
-        let lark_check = tokio::process::Command::new("lark-cli")
-            .arg("--version")
-            .output()
-            .await
-            .map_err(|e| CoreError::Config(format!(
-                "lark-cli not found in PATH. Feishu CLI is required. Error: {}", e
-            )))?;
-
-        if !lark_check.status.success() {
-            let stderr = String::from_utf8_lossy(&lark_check.stderr);
-            return Err(CoreError::Config(format!(
-                "lark-cli check failed: {}", stderr
-            )));
-        }
-        let _version = String::from_utf8_lossy(&lark_check.stdout).trim().to_string();
-        tracing::info!("Feishu CLI available");
-
-        // 3. Create bridge and check auth
+        // 3. Create bridge (no lark-cli dependency)
         let feishu_bridge = feishu::bridge::FeishuBridge::new();
-        let auth_ok = feishu_bridge.check_auth().await
-            .map_err(|e| CoreError::Config(format!("Feishu auth check failed: {e}")))?;
-        if !auth_ok {
-            return Err(CoreError::Config(
-                "Feishu not authenticated. Run 'lark-cli login' first.".into()
-            ));
-        }
-        tracing::info!("Feishu auth: OK");
 
         // Pick first available model config as default for summary generation
         let default_model_config = registry.all().first()
@@ -168,6 +156,8 @@ impl Core {
             registry,
             llm_gateway: llm::gateway::LlmGateway::new(llm_config, provider_resolver.clone()),
             feishu_bridge,
+            feishu_app_id,
+            feishu_app_secret,
             feishu_chat_id,
             default_model_config,
             memory_store,
@@ -236,63 +226,72 @@ impl Core {
         let _consumer_handle = feishu::message_queue::SendQueue::start_consumer(send_queue, consumer_bridge);
         tracing::info!("Send queue consumer started (5 QPS)");
 
-        // Start WebSocket event subscriber (Phase 3 V3: real lark-cli subscription)
-        let feishu_bridge_clone = self.feishu_bridge.clone();
-        let _ws_handle = tokio::spawn(async move {
-            tracing::info!("[WS] Attempting to subscribe to Feishu events...");
+        // Start Channel Bridge (Node.js plugin with Feishu Channel SDK)
+        let feishu_bridge = self.feishu_bridge.clone();
+        let feishu_app_id = self.feishu_app_id.clone();
+        let feishu_app_secret = self.feishu_app_secret.clone();
+        let _channel_handle = tokio::spawn(async move {
+            tracing::info!("[ChannelBridge] Starting Feishu Channel Bridge...");
 
-            // Check if lark-cli is available
-            match tokio::process::Command::new("lark-cli")
-                .arg("--version")
-                .output()
-                .await
-            {
-                Ok(output) if output.status.success() => {
-                    let version = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                    tracing::info!("[WS] lark-cli available: {}", version);
+            let mut channel_bridge = feishu::channel_bridge::FeishuChannelBridge::new();
 
-                    // Subscribe to message events
-                    match feishu_bridge_clone.subscribe_events(&["im.message.receive_v1"]).await {
-                        Ok(mut child) => {
-                            tracing::info!("[WS] Subscribed to im.message.receive_v1 (pid: {:?})", child.id());
+            match channel_bridge.start(&feishu_app_id, &feishu_app_secret).await {
+                Ok(()) => {
+                    tracing::info!("[ChannelBridge] Connected to Feishu via Channel SDK");
 
-                            // Read events from stdout
-                            if let Some(stdout) = child.stdout.take() {
-                                let mut reader = tokio::io::BufReader::new(stdout);
-                                let mut line = String::new();
-                                loop {
-                                    line.clear();
-                                    match tokio::time::timeout(
-                                        std::time::Duration::from_secs(300),
-                                        reader.read_line(&mut line),
-                                    ).await {
-                                        Ok(Ok(_)) if !line.trim().is_empty() => {
-                                            tracing::info!("[WS] Event received: {}", line.trim());
-                                            // Phase 3 V3: parse and route event
-                                        }
-                                        Ok(Ok(_)) => {} // empty line, skip
-                                        Ok(Err(e)) => {
-                                            tracing::error!("[WS] Read error: {e}");
-                                            break;
-                                        }
-                                        Err(_) => {
-                                            tracing::debug!("[WS] No events for 5min, still alive");
-                                        }
+                    // Register with FeishuBridge for message sending
+                    feishu_bridge.set_channel_bridge(channel_bridge.clone()).await;
+
+                    // Subscribe to incoming messages (broadcast receiver)
+                    let mut msg_rx = channel_bridge.subscribe_messages();
+                    // Also subscribe to status changes
+                    let mut status_rx = channel_bridge.subscribe_status();
+
+                    // Event loop: forward messages and track status
+                    loop {
+                        tokio::select! {
+                            Ok(msg) = msg_rx.recv() => {
+                                tracing::info!(
+                                    "[ChannelBridge] Message from {}: {}",
+                                    msg.sender_id,
+                                    &msg.content[..msg.content.len().min(60)],
+                                );
+                                // Phase 3 V3: route message to MessageRouter
+                            }
+                            Ok(_status) = status_rx.changed() => {
+                                let status = status_rx.borrow().clone();
+                                match &status {
+                                    feishu::types::ChannelStatus::Connected { bot_name } => {
+                                        tracing::info!("[ChannelBridge] Status: Connected as {bot_name}");
+                                    }
+                                    feishu::types::ChannelStatus::Connecting => {
+                                        tracing::info!("[ChannelBridge] Status: Reconnecting...");
+                                    }
+                                    feishu::types::ChannelStatus::Disconnected => {
+                                        tracing::warn!("[ChannelBridge] Status: Disconnected");
+                                        break;
+                                    }
+                                    feishu::types::ChannelStatus::Error(e) => {
+                                        tracing::error!("[ChannelBridge] Status: Error — {e}");
                                     }
                                 }
                             }
-                        }
-                        Err(e) => {
-                            tracing::warn!("[WS] Failed to subscribe: {e}");
+                            else => break,
                         }
                     }
                 }
-                _ => {
-                    tracing::warn!("[WS] lark-cli not available — WebSocket events disabled");
+                Err(e) => {
+                    tracing::error!("[ChannelBridge] Failed to start: {e}");
                 }
             }
         });
-        tracing::info!("WebSocket event subscriber started");
+        tracing::info!("Channel Bridge subscriber started");
+
+        // Also keep the old subscribe_events as a no-op for backward compat
+        let fb_legacy = self.feishu_bridge.clone();
+        let _legacy_handle = tokio::spawn(async move {
+            let _ = fb_legacy.subscribe_events(&["im.message.receive_v1"]).await;
+        });
 
         // Start skill file watcher (needs multi-threaded runtime)
         let skill_registry = self.skill_registry.clone();
@@ -311,6 +310,44 @@ impl Core {
         }
 
         // Start MCP file watcher
+        // Register Feishu Remote MCP server programmatically (not via mcp.json)
+        {
+            // Create and register the Feishu token manager for dynamic TAT refresh
+            let tm = feishu::token::FeishuTokenManager::new(
+                self.feishu_app_id.clone(),
+                self.feishu_app_secret.clone(),
+            );
+            mcp::config::register_feishu_token_manager(tm);
+
+            // Add Feishu Remote MCP as a standard HTTP MCP server
+            let feishu_mcp_server = mcp::config::McpServerConfig {
+                name: "feishu-remote-mcp".into(),
+                entry: mcp::config::McpServerEntry {
+                    url: Some("https://mcp.feishu.cn/mcp".into()),
+                    headers: std::collections::HashMap::from([
+                        ("Content-Type".into(), "application/json".into()),
+                        ("X-Lark-MCP-TAT".into(), "${FEISHU_TAT}".into()),
+                        ("X-Lark-MCP-Allowed-Tools".into(),
+                            "create-doc,fetch-doc,search-doc,update-doc,list-docs,get-comments,add-comments,search-user,get-user,fetch-file".into()),
+                    ]),
+                    command: None,
+                    args: vec![],
+                    env: std::collections::HashMap::new(),
+                    enabled: true,
+                },
+                tools: vec![],
+            };
+            {
+                let reg = self.mcp_registry.clone();
+                let handle = tokio::runtime::Handle::current();
+                handle.block_on(async move {
+                    let mut guard = reg.write().await;
+                    guard.register_server(feishu_mcp_server);
+                });
+            }
+            tracing::info!("Feishu Remote MCP server registered (programmatic)");
+        }
+
         let mcp_registry = self.mcp_registry.clone();
         let global_mcp_path = mcp::registry::global_mcp_path();
         let asst_mcp_path = mcp::registry::assistant_mcp_path();
@@ -318,7 +355,7 @@ impl Core {
         if asst_mcp_path.exists() {
             mcp_watch_files.push(asst_mcp_path);
         }
-        let agents_dir = std::path::PathBuf::from("agents");
+        let agents_dir = skill::registry::global_agents_dir();
         for record in self.registry.all() {
             let agent_mcp_path = agents_dir.join(&record.config.name).join("mcp.json");
             if agent_mcp_path.exists() {
@@ -334,7 +371,7 @@ impl Core {
         }
 
         // Start agent YAML file watcher (Phase 3 V3: full lifecycle management)
-        let agents_dir = std::path::PathBuf::from("agents");
+        let agents_dir = skill::registry::global_agents_dir();
         if agents_dir.exists() {
             use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
             use std::sync::mpsc;

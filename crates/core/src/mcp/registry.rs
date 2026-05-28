@@ -18,6 +18,11 @@ impl McpRegistry {
         }
     }
 
+    /// Register a single MCP server programmatically (not from mcp.json).
+    pub fn register_server(&mut self, config: McpServerConfig) {
+        self.servers.insert(config.name.clone(), config);
+    }
+
     /// Load MCP configs from mcp.json files (sync, no probing)
     pub fn discover_all(config_paths: &[PathBuf]) -> Result<Self, CoreError> {
         let mut registry = Self::new();

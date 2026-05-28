@@ -130,7 +130,11 @@ pub fn builtin_tool_definitions() -> Vec<ToolDefinition> {
 
 /// Check if a tool name is a built-in tool
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name, "read_file" | "write_file" | "glob_files" | "grep_search" | "list_directory" | "bash_exec" | "web_fetch" | "send_feishu_message")
+    matches!(name,
+        "read_file" | "write_file" | "glob_files" | "grep_search" |
+        "list_directory" | "bash_exec" | "web_fetch" |
+        "send_feishu_message"
+    )
 }
 
 /// Execute a built-in tool and return the result text
