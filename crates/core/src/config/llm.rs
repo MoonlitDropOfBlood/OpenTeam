@@ -12,17 +12,6 @@ pub struct LlmConfig {
     pub models: HashMap<String, ModelConfig>,
 }
 
-/// Model cost config in YAML (per 1M tokens)
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
-pub struct ModelCostConfig {
-    pub input: Option<f64>,
-    pub output: Option<f64>,
-    #[serde(default)]
-    pub cache_read: Option<f64>,
-    #[serde(default)]
-    pub cache_write: Option<f64>,
-}
-
 /// Model limit config in YAML
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ModelLimitConfig {
@@ -82,21 +71,6 @@ provider:
         let config: LlmConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.provider.is_empty());
         assert!(config.models.is_empty());
-    }
-
-    #[test]
-    fn test_model_cost_config() {
-        let yaml = r#"
-input: 3.0
-output: 15.0
-cache_read: 0.9
-cache_write: 3.0
-"#;
-        let cost: ModelCostConfig = serde_yaml::from_str(yaml).unwrap();
-        assert_eq!(cost.input, Some(3.0));
-        assert_eq!(cost.output, Some(15.0));
-        assert_eq!(cost.cache_read, Some(0.9));
-        assert_eq!(cost.cache_write, Some(3.0));
     }
 
     #[test]

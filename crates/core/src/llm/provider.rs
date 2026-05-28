@@ -1,6 +1,6 @@
 use crate::config::agent::ModelConfig;
 use crate::config::provider::ProviderConfig;
-use crate::llm::models::{ModelLimits, ModelCost, ModelCapabilities, ProviderDefaults};
+use crate::llm::models::{ModelLimits, ModelCapabilities, ProviderDefaults};
 use std::collections::HashMap;
 
 /// A fully resolved model with all configuration merged:
@@ -20,7 +20,6 @@ pub struct ResolvedModel {
     pub set_cache_key: bool,
     pub headers: Vec<(String, String)>,
     pub limits: ModelLimits,
-    pub cost: ModelCost,
     pub capabilities: ModelCapabilities,
     pub can_reason: bool,
     pub default_max_tokens: u32,
@@ -125,25 +124,6 @@ impl ProviderResolver {
             .map(|m| m.limits.clone())
             .unwrap_or_default();
 
-        let cost = if let Some(uc) = user_model.and_then(|m| m.cost) {
-            ModelCost {
-                input: uc
-                    .input
-                    .unwrap_or_else(|| builtin_model.map(|m| m.cost.input).unwrap_or(0.0)),
-                output: uc
-                    .output
-                    .unwrap_or_else(|| builtin_model.map(|m| m.cost.output).unwrap_or(0.0)),
-                cache_read: uc
-                    .cache_read
-                    .unwrap_or_else(|| builtin_model.map(|m| m.cost.cache_read).unwrap_or(0.0)),
-                cache_write: uc
-                    .cache_write
-                    .unwrap_or_else(|| builtin_model.map(|m| m.cost.cache_write).unwrap_or(0.0)),
-            }
-        } else {
-            builtin_model.map(|m| m.cost).unwrap_or_default()
-        };
-
         let set_cache_key = user_provider
             .and_then(|p| p.options.set_cache_key)
             .unwrap_or(false);
@@ -186,7 +166,6 @@ impl ProviderResolver {
             set_cache_key,
             headers,
             limits,
-            cost,
             capabilities: capabilities.clone(),
             can_reason: capabilities.can_reason,
             default_max_tokens: builtin_model

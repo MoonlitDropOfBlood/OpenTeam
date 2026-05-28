@@ -65,8 +65,6 @@ pub struct ProviderModelConfig {
     pub id: Option<String>,
     /// Display name
     pub name: Option<String>,
-    /// Token cost overrides
-    pub cost: Option<super::llm::ModelCostConfig>,
     /// Token limit overrides
     pub limit: Option<super::llm::ModelLimitConfig>,
     /// Per-model options (overrides provider-level options)
