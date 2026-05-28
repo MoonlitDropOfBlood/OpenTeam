@@ -266,7 +266,8 @@ triggers:"#,
                         "\n  - pattern: \"@{name}|@{name}\"\n    auto_respond: true\n"
                     ));
 
-                    let agents_dir = std::path::Path::new("agents");
+                    let agents_dir = crate::skill::registry::global_agents_dir();
+                    let _ = std::fs::create_dir_all(&agents_dir);
                     let path = agents_dir.join(format!("{}.yaml", name.to_lowercase()));
                     match std::fs::write(&path, &yaml_content) {
                         Ok(_) => tracing::info!("[HR] Created agent '{}' at {:?}", name, path),
@@ -278,8 +279,8 @@ triggers:"#,
                     ));
                 }
                 AssistantAction::DeleteAgent { name } => {
-                    let path =
-                        std::path::Path::new("agents").join(format!("{}.yaml", name.to_lowercase()));
+                    let agents_dir = crate::skill::registry::global_agents_dir();
+                    let path = agents_dir.join(format!("{}.yaml", name.to_lowercase()));
                     let mut deleted = false;
 
                     // Delete agent YAML
@@ -297,14 +298,14 @@ triggers:"#,
                     }
 
                     // Clean up per-agent skill directory
-                    let skills_dir = std::path::Path::new("agents").join(&name).join("skills");
+                    let skills_dir = agents_dir.join(&name).join("skills");
                     if skills_dir.exists() {
                         let _ = std::fs::remove_dir_all(&skills_dir);
                         tracing::info!("[HR] Deleted agent '{}' skills", name);
                     }
 
                     // Clean up per-agent MCP config
-                    let mcp_path = std::path::Path::new("agents").join(&name).join("mcps.json");
+                    let mcp_path = agents_dir.join(&name).join("mcp.json");
                     if mcp_path.exists() {
                         let _ = std::fs::remove_file(&mcp_path);
                         tracing::info!("[HR] Deleted agent '{}' MCP config", name);
