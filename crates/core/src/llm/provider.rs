@@ -162,6 +162,17 @@ impl ProviderResolver {
         let skip_verify_ssl = config.skip_verify_ssl.unwrap_or(false);
         let rate_limiter_key = format!("{}/{}", provider, model_name);
 
+        // Cap max_tokens using model's output limit
+        let max_tokens = if limits.output > 0 && config.max_tokens > limits.output {
+            tracing::warn!(
+                "Model {}/{}: capping max_tokens from {} to {} (model output limit)",
+                provider, model_name, config.max_tokens, limits.output
+            );
+            limits.output
+        } else {
+            config.max_tokens
+        };
+
         ResolvedModel {
             provider: provider.to_string(),
             model_name: model_name.to_string(),

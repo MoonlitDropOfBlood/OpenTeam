@@ -70,7 +70,13 @@ pub struct TokenUsage {
 
 impl LlmGateway {
     pub fn new(config: LlmConfig, provider_resolver: ProviderResolver) -> Self {
-        let skip_verify = config.models.values().any(|m| m.skip_verify_ssl.unwrap_or(false));
+        // Check skip_verify_ssl from both legacy models and provider configs
+        let skip_verify_legacy = config.models.values().any(|m| m.skip_verify_ssl.unwrap_or(false));
+        let skip_verify_provider = config.provider.values().any(|p| {
+            p.options.headers.contains_key("skip_verify_ssl")
+                || p.options.base_url.as_deref().map_or(false, |url| url.starts_with("http://"))
+        });
+        let skip_verify = skip_verify_legacy || skip_verify_provider;
 
         let mut client_builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(180));
@@ -196,8 +202,8 @@ impl LlmGateway {
             "messages": messages,
         });
 
-        // Tools
-        if !request.tools.is_empty() {
+        // Tools (only if model supports tool calling)
+        if resolved.capabilities.supports_tools && !request.tools.is_empty() {
             let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
                 serde_json::json!({
                     "name": t.name,
@@ -208,12 +214,14 @@ impl LlmGateway {
             body["tools"] = serde_json::json!(tools);
         }
 
-        // Optional params
-        if let Some(temp) = resolved.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = resolved.top_p {
-            body["top_p"] = serde_json::json!(top_p);
+        // Optional params (gated by capabilities)
+        if resolved.capabilities.supports_temperature {
+            if let Some(temp) = resolved.temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(top_p) = resolved.top_p {
+                body["top_p"] = serde_json::json!(top_p);
+            }
         }
         if let Some(top_k) = resolved.top_k {
             body["top_k"] = serde_json::json!(top_k);
@@ -324,11 +332,14 @@ impl LlmGateway {
             "stream": false,
         });
 
-        if let Some(temp) = resolved.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = resolved.top_p {
-            body["top_p"] = serde_json::json!(top_p);
+        // Optional params (gated by capabilities)
+        if resolved.capabilities.supports_temperature {
+            if let Some(temp) = resolved.temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(top_p) = resolved.top_p {
+                body["top_p"] = serde_json::json!(top_p);
+            }
         }
         if let Some(stop) = &resolved.stop {
             body["stop"] = serde_json::json!(stop);
@@ -390,8 +401,8 @@ impl LlmGateway {
             }
         }
 
-        // Tools
-        if !request.tools.is_empty() {
+        // Tools (only if model supports tool calling)
+        if resolved.capabilities.supports_tools && !request.tools.is_empty() {
             let tools: Vec<serde_json::Value> = request.tools.iter().map(|t| {
                 serde_json::json!({
                     "type": "function",
@@ -406,12 +417,14 @@ impl LlmGateway {
             body["tool_choice"] = serde_json::json!("auto");
         }
 
-        // Optional params
-        if let Some(temp) = resolved.temperature {
-            body["temperature"] = serde_json::json!(temp);
-        }
-        if let Some(top_p) = resolved.top_p {
-            body["top_p"] = serde_json::json!(top_p);
+        // Optional params (gated by capabilities)
+        if resolved.capabilities.supports_temperature {
+            if let Some(temp) = resolved.temperature {
+                body["temperature"] = serde_json::json!(temp);
+            }
+            if let Some(top_p) = resolved.top_p {
+                body["top_p"] = serde_json::json!(top_p);
+            }
         }
         if let Some(top_k) = resolved.top_k {
             if resolved.provider != "openai" {
