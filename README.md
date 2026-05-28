@@ -25,10 +25,14 @@
 - **SQLite 存储**：本地持久化，零外部依赖
 
 ### LLM 集成
-- **多 Provider**：Anthropic Claude + DeepSeek V4 + OpenAI 兼容 + Ollama 本地模型
+- **多 Provider**：Anthropic Claude + DeepSeek V4 + OpenAI 兼容 + Ollama + GROQ + OpenRouter + xAI
+- **OpenCode 兼容配置**：完整的 provider + model 配置体系，支持 `base_url`、`timeout`、`apiKey`、自定义 headers
 - **Agent 级配置**：每个 Agent 独立配置 primary + fallback 模型
+- **推理模式**：支持 Anthropic thinking 预算 + DeepSeek 推理模式 + OpenAI reasoning_effort
+- **智能重试**：指数退避 + 20% 抖动 + Retry-After 头解析
+- **结构化错误**：LlmAuth / LlmRateLimit / LlmApi 分类错误处理
 - **限流保护**：滑动窗口 RPM 限流器
-- **超时控制**：可配置 API 超时
+- **超额重试保护**：401/403/400 等非可重试错误不重试
 
 ### 飞书集成
 - **消息收发**：发送/回复/话题线程回复
@@ -151,9 +155,86 @@ llm:
 | `skip_verify_ssl` | bool | 跳过 SSL 证书验证 |
 | `base_url` | String | 自定义 API 端点，覆盖 provider 默认地址 |
 
-#### 全局模型池（可选）
+#### Provider 配置块（`llm_config.yaml`）
 
-`llm_config.yaml` 定义共享模型池，Agent 可以通过此池引用模型（Agent 内嵌配置优先级更高）：
+`llm_config.yaml` 定义 Provider 级别配置和全局模型池。每个 Provider 有单独的 options（baseURL、timeout、cache key 等）：
+
+```yaml
+provider:
+  anthropic:
+    name: "Anthropic"
+    env: ["ANTHROPIC_API_KEY"]
+    options:
+      baseURL: https://api.anthropic.com/v1
+      timeout: 300000
+      setCacheKey: true
+    models:
+      claude-sonnet-4-20250514:
+        name: "Claude Sonnet 4"
+        limit: { context: 200000, output: 50000 }
+
+  deepseek:
+    name: "DeepSeek"
+    env: ["DEEPSEEK_API_KEY"]
+    options:
+      baseURL: https://api.deepseek.com/v1
+      timeout: 300000
+    models:
+      deepseek-v4-pro:
+        name: "DeepSeek V4 Pro"
+        limit: { context: 64000, output: 8192 }
+
+  openai:
+    name: "OpenAI"
+    env: ["OPENAI_API_KEY"]
+    options:
+      baseURL: https://api.openai.com/v1
+      timeout: 300000
+    models:
+      gpt-4o:
+        name: "GPT 4o"
+        limit: { context: 128000, output: 4096 }
+
+  ollama:
+    name: "Ollama (local)"
+    options:
+      baseURL: http://localhost:11434/api
+      timeout: 60000
+
+  groq:
+    name: "GROQ"
+    env: ["GROQ_API_KEY"]
+    options:
+      baseURL: https://api.groq.com/openai/v1
+      timeout: 300000
+
+  openrouter:
+    name: "OpenRouter"
+    env: ["OPENROUTER_API_KEY"]
+    options:
+      baseURL: https://openrouter.ai/api/v1
+      timeout: 300000
+
+  xai:
+    name: "xAI"
+    env: ["XAI_API_KEY"]
+    options:
+      baseURL: https://api.x.ai/v1
+      timeout: 300000
+```
+
+| Provider 选项 | 类型 | 说明 |
+|---------------|------|------|
+| `options.baseURL` | String | API 端点地址 |
+| `options.timeout` | Number | 请求超时（毫秒，默认 300000） |
+| `options.apiKey` | String | API Key（支持 `{env:VAR}` 引用） |
+| `options.headers` | Object | 自定义 HTTP 请求头 |
+| `options.setCacheKey` | Bool | 启用 Prompt Cache（Anthropic/DeepSeek） |
+| `options.chunkTimeout` | Number | SSE 流式 chunk 超时（毫秒） |
+
+#### 全局模型池（兼容旧格式）
+
+保留旧 `models:` 格式以兼容已有配置，但新配置请使用 `provider:` 块：
 
 ```yaml
 models:
@@ -164,36 +245,19 @@ models:
     timeout_secs: 120
     rate_limit: { rpm: 50, tpm: 100000 }
 
-  deepseek-v4-pro:
-    model: deepseek/deepseek-v4-pro
-    api_key_env: DEEPSEEK_API_KEY
-    max_tokens: 8192
-    timeout_secs: 120
-    rate_limit: { rpm: 50, tpm: 200000 }
-
-  deepseek-v4-flash:
-    model: deepseek/deepseek-v4-flash
-    api_key_env: DEEPSEEK_API_KEY
-    max_tokens: 8192
-    timeout_secs: 120
-    rate_limit: { rpm: 100, tpm: 500000 }
-
-  ollama-qwen:
-    model: ollama/qwen2.5:3b
-    max_tokens: 4096
-    timeout_secs: 60
-```
-
 **支持的 Provider：**
 
-| Provider | API 端点 | 认证 |
-|----------|---------|------|
-| `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` |
-| `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` |
-| `openai` | `https://api.openai.com/v1/chat/completions` | `OPENAI_API_KEY` |
-| `ollama` | `http://localhost:11434/api/chat` | 无需认证 |
+| Provider | API 端点 | 认证 | 类型 |
+|----------|---------|------|------|
+| `anthropic` | `https://api.anthropic.com/v1/messages` | `ANTHROPIC_API_KEY` | 原生 |
+| `deepseek` | `https://api.deepseek.com/v1/chat/completions` | `DEEPSEEK_API_KEY` | OpenAI 兼容 |
+| `openai` | `https://api.openai.com/v1/chat/completions` | `OPENAI_API_KEY` | OpenAI 兼容 |
+| `groq` | `https://api.groq.com/openai/v1` | `GROQ_API_KEY` | OpenAI 兼容 |
+| `openrouter` | `https://openrouter.ai/api/v1` | `OPENROUTER_API_KEY` | OpenAI 兼容 |
+| `xai` | `https://api.x.ai/v1` | `XAI_API_KEY` | OpenAI 兼容 |
+| `ollama` | `http://localhost:11434/api/chat` | 无需认证 | Ollama 原生 |
 
-`base_url` 可覆盖任意 provider 的默认端点，实现任意 OpenAI 兼容 API 接入。
+`base_url` 可覆盖任意 provider 的默认端点，实现任意 OpenAI 兼容 API 接入。OpenRouter 会自动添加 `HTTP-Referer` 和 `X-Title` 头。
 
 ---
 
@@ -312,7 +376,7 @@ cd OpenTeam
 # 构建全部（首次约 2-3 分钟）
 cargo build
 
-# 运行测试（57 tests）
+# 运行测试（81 tests）
 cargo test
 ```
 
@@ -416,14 +480,18 @@ export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
 
 ```
 ├── Cargo.toml                     # Workspace 定义
-├── llm_config.yaml                # 全局 LLM 模型池
+├── llm_config.yaml                # 全局 LLM 模型池 + Provider 配置
 ├── agents/                        # Agent YAML 配置
 │   └── pm.yaml                    # 示例 Agent
 ├── crates/core/                   # Rust Core 库
 │   └── src/
-│       ├── config/                # 配置解析
+│       ├── config/                # 配置解析（含 provider 配置）
 │       ├── registry/              # Agent 注册中心
-│       ├── llm/                   # LLM Gateway
+│       ├── llm/                   # LLM Gateway + Provider 分辨率 + 内建模型定义
+│       │   ├── gateway.rs         # LLM HTTP 请求/响应（3 个 provider 实现）
+│       │   ├── models.rs          # 内建模型定义（22 个模型，成本/容量/能力）
+│       │   ├── provider.rs        # ProviderResolver 三层分辨率链
+│       │   └── rate_limiter.rs    # 滑动窗口 RPM 限流器
 │       ├── feishu/                # 飞书 CLI Bridge
 │       ├── memory/                # 三层记忆系统
 │       ├── agent/                 # Agent 生命周期
@@ -461,7 +529,7 @@ cargo test --test smoke_test
 |---|------|
 | 核心引擎 | Rust (Tokio async) |
 | TUI | Ratatui + Crossterm |
-| LLM | Anthropic Claude / DeepSeek V4 / Ollama |
+| LLM | Anthropic Claude / DeepSeek V4 / OpenAI / GROQ / OpenRouter / xAI / Ollama |
 | 存储 | SQLite (sqlx) |
 | 向量化 | ONNX Runtime / hash-based fallback |
 | 飞书 | lark-cli |

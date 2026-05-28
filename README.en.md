@@ -25,10 +25,13 @@
 - **SQLite Storage**: Local persistence, zero external dependencies
 
 ### LLM Integration
-- **Multiple Providers**: Anthropic Claude + DeepSeek V4 + OpenAI-compatible + Ollama local models
+- **Multiple Providers**: Anthropic Claude + DeepSeek V4 + OpenAI-compatible + Ollama + GROQ + OpenRouter + xAI
+- **OpenCode-Compatible Config**: Full provider + model config system with baseURL, timeout, apiKey, custom headers
 - **Per-Agent Config**: Each Agent independently configures primary + fallback models
+- **Reasoning Modes**: Anthropic thinking budget + DeepSeek reasoning + OpenAI reasoning_effort
+- **Smart Retry**: Exponential backoff + 20% jitter + Retry-After header parsing
+- **Structured Errors**: LlmAuth / LlmRateLimit / LlmApi classification
 - **Rate Limiting**: Sliding window RPM limiter
-- **Timeout Control**: Configurable API timeout per model
 
 ### Feishu Integration
 - **Messaging**: Send/reply/thread replies
@@ -287,7 +290,7 @@ git clone <repo-url>
 cd OpenTeam
 
 cargo build
-cargo test
+cargo test   # 81 tests
 ```
 
 ### Step 2: Set API Keys
@@ -410,7 +413,7 @@ cargo test --test smoke_test
 |-------|-----------|
 | Core Engine | Rust (Tokio async) |
 | TUI | Ratatui + Crossterm |
-| LLM | Anthropic Claude / DeepSeek V4 / Ollama |
+| LLM | Anthropic Claude / DeepSeek V4 / OpenAI / GROQ / OpenRouter / xAI / Ollama |
 | Storage | SQLite (sqlx) |
 | Vectorization | ONNX Runtime / hash-based fallback |
 | Feishu | lark-cli |
