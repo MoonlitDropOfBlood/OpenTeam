@@ -20,3 +20,4 @@ json_rpc = "0.2"  # Plugin IPC (Phase 3); crate name uses underscore not hyphen
 notify.workspace = true
 regex.workspace = true
 once_cell.workspace = true
+rand.workspace = true

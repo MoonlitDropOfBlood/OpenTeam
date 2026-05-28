@@ -394,6 +394,27 @@ static BUILTIN_PROVIDER_DEFAULTS: LazyLock<Vec<ProviderDefaults>> = LazyLock::ne
             timeout_ms: 300000,
         },
         ProviderDefaults {
+            name: "groq".into(),
+            base_url: "https://api.groq.com/openai/v1".into(),
+            api_key_env: "GROQ_API_KEY".into(),
+            env_vars: vec!["GROQ_API_KEY".into()],
+            timeout_ms: 300000,
+        },
+        ProviderDefaults {
+            name: "openrouter".into(),
+            base_url: "https://openrouter.ai/api/v1".into(),
+            api_key_env: "OPENROUTER_API_KEY".into(),
+            env_vars: vec!["OPENROUTER_API_KEY".into()],
+            timeout_ms: 300000,
+        },
+        ProviderDefaults {
+            name: "xai".into(),
+            base_url: "https://api.x.ai/v1".into(),
+            api_key_env: "XAI_API_KEY".into(),
+            env_vars: vec!["XAI_API_KEY".into()],
+            timeout_ms: 300000,
+        },
+        ProviderDefaults {
             name: "ollama".into(),
             base_url: "http://localhost:11434/api".into(),
             api_key_env: String::new(),

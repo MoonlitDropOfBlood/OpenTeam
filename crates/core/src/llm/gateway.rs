@@ -5,6 +5,7 @@ use crate::config::llm::LlmConfig;
 use crate::CoreError;
 use super::provider::ProviderResolver;
 use super::rate_limiter::RateLimiter;
+use rand::Rng;
 
 #[derive(Clone)]
 pub struct LlmGateway {
@@ -60,12 +61,16 @@ pub struct ChatResponse {
     pub tool_calls: Vec<ToolCall>,
     pub usage: TokenUsage,
     pub reasoning_content: Option<String>,
+    pub stop_reason: Option<String>,
 }
 
 #[derive(Debug, Clone)]
 pub struct TokenUsage {
     pub input_tokens: u32,
     pub output_tokens: u32,
+    pub cache_read_input_tokens: Option<u32>,
+    pub cache_write_input_tokens: Option<u32>,
+    pub reasoning_tokens: Option<u32>,
 }
 
 impl LlmGateway {
@@ -141,30 +146,42 @@ impl LlmGateway {
 
         for attempt in 0..=max_retries {
             if attempt > 0 {
+                // Exponential backoff: 1s, 2s, 4s, 8s... + 20% jitter
+                let base_ms = 1000u64 * (1u64 << (attempt - 1)); // 1000, 2000, 4000, ...
+                let jitter_ms = rand::thread_rng().gen_range(0..=(base_ms / 5));
+                let delay = std::time::Duration::from_millis(base_ms + jitter_ms);
                 tracing::warn!(
-                    "Retry attempt {}/{} for {}",
+                    "Retry attempt {}/{} for {} (delay: {}ms)",
                     attempt,
                     max_retries,
-                    resolved.api_model
+                    resolved.api_model,
+                    base_ms + jitter_ms,
                 );
-                tokio::time::sleep(std::time::Duration::from_secs(2u64.pow(attempt))).await;
+                tokio::time::sleep(delay).await;
             }
 
             let result = match resolved.provider.as_str() {
                 "anthropic" => self.call_anthropic_resolved(&resolved, &api_key, request).await,
                 "ollama" => self.call_ollama_resolved(&resolved, &api_key, request).await,
-                "deepseek" | "openai" => self.call_openai_compat_resolved(&resolved, &api_key, request).await,
+                "deepseek" | "openai" | "groq" | "openrouter" | "xai"
+                    => self.call_openai_compat_resolved(&resolved, &api_key, request).await,
                 provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
             };
 
             match result {
                 Ok(resp) => return Ok(resp),
+                Err(e @ CoreError::LlmAuth { .. }) => return Err(e),
+                Err(e @ CoreError::LlmRateLimit { retry_after_secs: Some(after), .. }) => {
+                    tokio::time::sleep(std::time::Duration::from_secs(after as u64)).await;
+                    last_error = Some(e);
+                }
+                Err(e @ CoreError::LlmApi { retryable: false, .. }) => return Err(e),
+                Err(e @ CoreError::LlmApi { .. }) => last_error = Some(e),
                 Err(e) => {
+                    // Fallback: string-based error matching for old Llm(String) variant
                     let err_str = e.to_string();
-                    if err_str.contains("401")
-                        || err_str.contains("403")
-                        || err_str.contains("400")
-                        || err_str.contains("Unsupported provider")
+                    if err_str.contains("401") || err_str.contains("403")
+                        || err_str.contains("400") || err_str.contains("Unsupported provider")
                     {
                         return Err(e);
                     }
@@ -247,12 +264,34 @@ impl LlmGateway {
             }
         }
 
-        // Prompt caching
-        if resolved.set_cache_key && request.system_prompt.len() > 1000 {
-            if let Some(sys) = body["system"].as_str() {
-                body["system"] = serde_json::json!([
-                    {"type": "text", "text": sys, "cache_control": {"type": "ephemeral"}}
-                ]);
+        // Prompt caching: system prompt + last 3 messages + last tool
+        if resolved.set_cache_key {
+            // System prompt as array with cache_control
+            body["system"] = serde_json::json!([{
+                "type": "text",
+                "text": request.system_prompt,
+                "cache_control": { "type": "ephemeral" }
+            }]);
+            
+            // Apply cache_control to last 3 messages
+            if let Some(arr) = body["messages"].as_array_mut() {
+                let msg_count = arr.len();
+                for (i, msg) in arr.iter_mut().enumerate() {
+                    if i >= msg_count.saturating_sub(3) {
+                        if let Some(obj) = msg.as_object_mut() {
+                            obj.insert("cache_control".into(), serde_json::json!({"type": "ephemeral"}));
+                        }
+                    }
+                }
+            }
+            
+            // Apply cache_control to last tool
+            if let Some(tools) = body["tools"].as_array_mut() {
+                if let Some(last_tool) = tools.last_mut() {
+                    if let Some(obj) = last_tool.as_object_mut() {
+                        obj.insert("cache_control".into(), serde_json::json!({"type": "ephemeral"}));
+                    }
+                }
             }
         }
 
@@ -276,6 +315,7 @@ impl LlmGateway {
         // Parse content blocks
         let mut text_content = String::new();
         let mut tool_calls = Vec::new();
+        let mut reasoning_content = String::new();
 
         if let Some(content_blocks) = json["content"].as_array() {
             for block in content_blocks {
@@ -292,6 +332,11 @@ impl LlmGateway {
                             arguments: block["input"].clone(),
                         });
                     }
+                    Some("thinking") => {
+                        if let Some(text) = block["thinking"].as_str() {
+                            reasoning_content.push_str(text);
+                        }
+                    }
                     _ => {}
                 }
             }
@@ -304,14 +349,27 @@ impl LlmGateway {
                 .to_string();
         }
 
-        let input_tokens = json["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+        let raw_input = json["usage"]["input_tokens"].as_u64().unwrap_or(0) as u32;
+        let cache_read = json["usage"]["cache_read_input_tokens"].as_u64().unwrap_or(0) as u32;
+        let cache_create = json["usage"]["cache_creation_input_tokens"].as_u64().unwrap_or(0) as u32;
+        let input_tokens = raw_input + cache_read + cache_create;
         let output_tokens = json["usage"]["output_tokens"].as_u64().unwrap_or(0) as u32;
+
+        let reasoning_content = if reasoning_content.is_empty() { None } else { Some(reasoning_content) };
+        let stop_reason = json["stop_reason"].as_str().map(|s| s.to_string());
 
         Ok(ChatResponse {
             content: text_content,
             tool_calls,
-            reasoning_content: None,
-            usage: TokenUsage { input_tokens, output_tokens },
+            reasoning_content,
+            stop_reason,
+            usage: TokenUsage {
+                input_tokens,
+                output_tokens,
+                cache_read_input_tokens: Some(cache_read),
+                cache_write_input_tokens: if cache_create > 0 { Some(cache_create) } else { None },
+                reasoning_tokens: None,
+            },
         })
     }
 
@@ -358,12 +416,14 @@ impl LlmGateway {
             .as_str()
             .unwrap_or("")
             .to_string();
+        let stop_reason = json["done_reason"].as_str().map(|s| s.to_string());
 
         Ok(ChatResponse {
             content,
             tool_calls: vec![],
             reasoning_content: None,
-            usage: TokenUsage { input_tokens: 0, output_tokens: 0 },
+            stop_reason,
+            usage: TokenUsage { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: None, cache_write_input_tokens: None, reasoning_tokens: None },
         })
     }
 
@@ -382,11 +442,20 @@ impl LlmGateway {
             serde_json::json!({"role": m.role, "content": m.content})
         }));
 
-        let mut body = serde_json::json!({
-            "model": resolved.api_model,
-            "max_tokens": resolved.max_tokens,
-            "messages": all_messages,
-        });
+        let use_completion_tokens = resolved.provider == "openai" && resolved.can_reason;
+        let mut body = if use_completion_tokens {
+            serde_json::json!({
+                "model": resolved.api_model,
+                "max_completion_tokens": resolved.max_tokens,
+                "messages": all_messages,
+            })
+        } else {
+            serde_json::json!({
+                "model": resolved.api_model,
+                "max_tokens": resolved.max_tokens,
+                "messages": all_messages,
+            })
+        };
 
         // Preserve reasoning_content from previous turns (DeepSeek thinking mode)
         for msg in &request.messages {
@@ -465,6 +534,12 @@ impl LlmGateway {
             req = req.header("x-cache-key", format!("{}:{}", resolved.provider, resolved.api_model));
         }
 
+        // OpenRouter-specific headers
+        if resolved.provider == "openrouter" {
+            req = req.header("HTTP-Referer", "https://github.com/MoonlitDropOfBlood/OpenTeam");
+            req = req.header("X-Title", "OpenTeam");
+        }
+
         // Custom headers
         for (key, value) in &resolved.headers {
             req = req.header(key.as_str(), value.as_str());
@@ -472,7 +547,36 @@ impl LlmGateway {
 
         let response = tokio::time::timeout(timeout, req.json(&body).send())
             .await
-            .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))??;
+            .map_err(|e| CoreError::Llm(format!("Timeout or request error: {}", e)))?
+            .map_err(|e| CoreError::Llm(format!("Request error: {}", e)))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let retry_after = response.headers()
+                .get("Retry-After")
+                .and_then(|v| v.to_str().ok())
+                .and_then(|v| v.parse::<u32>().ok());
+            let body_text = response.text().await.unwrap_or_default();
+
+            let err = match status.as_u16() {
+                401 | 403 => CoreError::LlmAuth {
+                    provider: resolved.provider.clone(),
+                    message: body_text,
+                },
+                429 => CoreError::LlmRateLimit {
+                    provider: resolved.provider.clone(),
+                    message: body_text,
+                    retry_after_secs: retry_after,
+                },
+                code => CoreError::LlmApi {
+                    provider: resolved.provider.clone(),
+                    message: body_text,
+                    status_code: code,
+                    retryable: code >= 500,
+                },
+            };
+            return Err(err);
+        }
 
         let json: serde_json::Value = response.json().await?;
 
@@ -496,12 +600,22 @@ impl LlmGateway {
 
         let input_tokens = json["usage"]["prompt_tokens"].as_u64().unwrap_or(0) as u32;
         let output_tokens = json["usage"]["completion_tokens"].as_u64().unwrap_or(0) as u32;
+        let cached = json["usage"]["prompt_tokens_details"]["cached_tokens"].as_u64().unwrap_or(0) as u32;
+        let reasoning = json["usage"]["completion_tokens_details"]["reasoning_tokens"].as_u64().unwrap_or(0) as u32;
+        let stop_reason = json["choices"][0]["finish_reason"].as_str().map(|s| s.to_string());
 
         Ok(ChatResponse {
             content,
             tool_calls,
             reasoning_content: message["reasoning_content"].as_str().map(|s| s.to_string()),
-            usage: TokenUsage { input_tokens, output_tokens },
+            stop_reason,
+            usage: TokenUsage {
+                input_tokens,
+                output_tokens,
+                cache_read_input_tokens: if cached > 0 { Some(cached) } else { None },
+                cache_write_input_tokens: None,
+                reasoning_tokens: if reasoning > 0 { Some(reasoning) } else { None },
+            },
         })
     }
 }

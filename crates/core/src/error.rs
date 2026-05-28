@@ -8,6 +8,18 @@ pub enum CoreError {
     #[error("LLM error: {0}")]
     Llm(String),
 
+    /// LLM authentication error (401/403) — not retryable
+    #[error("LLM auth error ({provider}): {message}")]
+    LlmAuth { provider: String, message: String },
+
+    /// LLM rate limit error (429) — retryable with optional Retry-After
+    #[error("LLM rate limited ({provider}): {message}")]
+    LlmRateLimit { provider: String, message: String, retry_after_secs: Option<u32> },
+
+    /// LLM API error (4xx/5xx) — may be retryable
+    #[error("LLM API error ({provider}): {message}")]
+    LlmApi { provider: String, message: String, status_code: u16, retryable: bool },
+
     #[error("Feishu error: {0}")]
     Feishu(String),
 
