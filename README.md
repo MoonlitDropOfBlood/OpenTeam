@@ -167,7 +167,7 @@ provider:
     name: "Anthropic"
     env: ["ANTHROPIC_API_KEY"]
     options:
-      baseURL: https://api.anthropic.com/v1
+      baseUrl: https://api.anthropic.com/v1
       timeout: 300000
       setCacheKey: true
     models:
@@ -179,18 +179,35 @@ provider:
     name: "DeepSeek"
     env: ["DEEPSEEK_API_KEY"]
     options:
-      baseURL: https://api.deepseek.com/v1
+      baseUrl: https://api.deepseek.com/v1
       timeout: 300000
     models:
       deepseek-v4-pro:
         name: "DeepSeek V4 Pro"
         limit: { context: 64000, output: 8192 }
+      deepseek-v4-flash:
+        name: "DeepSeek V4 Flash"
+        limit: { context: 64000, output: 8192 }
+
+  volcengine-plan:
+    name: "Volcano Engine"
+    env: ["VOLCENGINE_API_KEY"]
+    options:
+      baseUrl: https://ark.cn-beijing.volces.com/api/coding/v3
+      timeout: 300000
+    models:
+      deepseek-v4-flash:
+        name: "DeepSeek V4 Flash"
+        limit: { context: 1000000, output: 384000 }
+      deepseek-v4-pro:
+        name: "DeepSeek V4 Pro"
+        limit: { context: 1000000, output: 384000 }
 
   openai:
     name: "OpenAI"
     env: ["OPENAI_API_KEY"]
     options:
-      baseURL: https://api.openai.com/v1
+      baseUrl: https://api.openai.com/v1
       timeout: 300000
     models:
       gpt-4o:
@@ -200,7 +217,7 @@ provider:
   ollama:
     name: "Ollama (local)"
     options:
-      baseURL: http://localhost:11434/api
+      baseUrl: http://localhost:11434/api
       timeout: 60000
 
   groq:
@@ -227,9 +244,9 @@ provider:
 
 | Provider 选项 | 类型 | 说明 |
 |---------------|------|------|
-| `options.baseURL` | String | API 端点地址 |
+| `options.baseUrl` | String | API 端点地址 |
 | `options.timeout` | Number | 请求超时（毫秒，默认 300000） |
-| `options.apiKey` | String | API Key（支持 `{env:VAR}` 引用） |
+| `options.apiKey` | String | API Key（支持 `{env:VAR}` 引用）或直接写 key |
 | `options.headers` | Object | 自定义 HTTP 请求头 |
 | `options.setCacheKey` | Bool | 启用 Prompt Cache（Anthropic/DeepSeek） |
 | `options.chunkTimeout` | Number | SSE 流式 chunk 超时（毫秒） |
@@ -482,6 +499,22 @@ feishu:
 cd plugins/feishu-channel && npm install
 ```
 
+**配置 LLM Provider（编辑项目根目录 `llm_config.yaml`）：**
+
+```yaml
+# 在 provider 下添加你的 LLM 服务商，API Key 直接写在 options.apiKey
+provider:
+  volcengine-plan:
+    options:
+      baseUrl: https://ark.cn-beijing.volces.com/api/coding/v3
+      apiKey: "你的API Key"    # 替换为你的 API Key
+    models:
+      deepseek-v4-flash:
+        limit: { context: 1000000, output: 384000 }
+```
+
+不填 `apiKey` 的话，也可以从环境变量读取（参考 `api_key_env` 字段）。
+
 缺少任一配置，系统将在启动时报错并退出。
 
 配置状态可在 TUI F5 页面查看。
@@ -539,12 +572,13 @@ cargo test --test smoke_test
 |---|------|
 | 核心引擎 | Rust (Tokio async) |
 | TUI | Ratatui + Crossterm |
-| LLM | Anthropic Claude / DeepSeek V4 / OpenAI / GROQ / OpenRouter / xAI / Ollama |
+| LLM | Anthropic Claude / DeepSeek V4 / OpenAI / GROQ / OpenRouter / xAI / Ollama / 火山引擎 |
 | 存储 | SQLite (sqlx) |
 | 向量化 | ONNX Runtime / hash-based fallback |
 | 飞书消息 | Channel SDK (`@larksuiteoapi/node-sdk` WebSocket 长连) |
 | 飞书工具 | Remote MCP (`https://mcp.feishu.cn/mcp`，TAT 自动刷新) |
 | MCP | stdio / HTTP 传输，标准 JSON-RPC |
+| 日志 | `tracing` + `tracing-appender` 按日滚动文件 |
 | 插件 | Node.js + JSON-RPC over stdio |
 | 文件监控 | notify (热重载) |
 
