@@ -210,8 +210,10 @@ async fn main() -> anyhow::Result<()> {
 
         if event::poll(Duration::from_millis(100))? {
             if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
+                // Handle both Press and Repeat key events (some terminals use Repeat)
+                let is_action = matches!(key.kind, KeyEventKind::Press | KeyEventKind::Repeat);
+                if !is_action { continue; }
+                match key.code {
                         KeyCode::Char('q') | KeyCode::Esc => app.quit(),
                         KeyCode::Char('r') => {
                             refresh_from_core(&mut app, &core).await;
@@ -257,7 +259,6 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         }
-    }
 
     core.shutdown().await;
     ratatui::restore();
