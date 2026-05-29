@@ -4,7 +4,6 @@ personality: "Efficient, organized, proactive"
 llm:
   primary:
     model: volcengine-plan/deepseek-v4-flash
-    api_key_env: VOLCENGINE_API_KEY
     max_tokens: 8192
 triggers:
   - pattern: "@助理|@assistant"

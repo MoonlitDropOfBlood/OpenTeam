@@ -190,15 +190,9 @@ impl ProviderResolver {
         user_provider: Option<&ProviderConfig>,
         provider_default: Option<&ProviderDefaults>,
     ) -> (String, bool) {
-        // Priority 1: Agent config's api_key_env
-        if let Some(env) = &config.api_key_env {
-            return (env.clone(), false);
-        }
-
-        // Priority 2: User provider config's options.api_key (direct value)
+        // Priority 1: Provider config's options.apiKey (from llm_config.yaml) — highest priority
         if let Some(up) = user_provider {
             if let Some(api_key) = &up.options.api_key {
-                // Check if it's an {env:VAR} reference
                 if api_key.starts_with("{env:") && api_key.ends_with("}") {
                     let env_var = &api_key[5..api_key.len() - 1];
                     return (env_var.to_string(), false);
@@ -206,6 +200,11 @@ impl ProviderResolver {
                 // Direct API key value
                 return (api_key.clone(), true);
             }
+        }
+
+        // Priority 2: Agent config's api_key_env
+        if let Some(env) = &config.api_key_env {
+            return (env.clone(), false);
         }
 
         // Priority 3: Built-in provider default env var
