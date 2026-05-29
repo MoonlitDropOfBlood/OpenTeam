@@ -54,6 +54,10 @@ async fn refresh_from_core(app: &mut App, core: &Core) {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    // Enable info-level tracing by default for visibility
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
         .init();
@@ -61,8 +65,8 @@ async fn main() -> anyhow::Result<()> {
     let mut terminal = ratatui::init();
 
     // Show loading screen while Core initializes
-    let core = {
-        let agents_dir = Path::new("agents");
+    let mut core = {
+        let agents_dir = feishu_agent_core::skill::registry::global_agents_dir();
         let llm_config = Path::new("llm_config.yaml");
         let frames = ["|", "/", "-", "\\"];
         let steps = [
@@ -77,7 +81,7 @@ async fn main() -> anyhow::Result<()> {
         let mut step_idx = 0;
 
         // Spawn Core init in background
-        let core_fut = Core::new(agents_dir, llm_config, "sqlite:tui.db");
+        let core_fut = Core::new(&agents_dir, llm_config, "sqlite:tui.db");
         let mut core_poll = std::pin::pin!(core_fut);
 
         loop {
@@ -169,6 +173,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
     };
+
+    // Start background scheduler: Channel Bridge, send queue, MCP, file watchers
+    core.start_scheduler();
+    core.spawn_all_agents().await;
 
     let mut app = App::new();
 
