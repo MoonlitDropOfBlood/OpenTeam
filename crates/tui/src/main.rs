@@ -175,7 +175,7 @@ async fn main() -> anyhow::Result<()> {
     };
 
     // Start background scheduler: Channel Bridge, send queue, MCP, file watchers
-    core.start_scheduler();
+    core.start_scheduler().await;
     core.spawn_all_agents().await;
 
     let mut app = App::new();

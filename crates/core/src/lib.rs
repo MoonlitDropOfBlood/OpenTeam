@@ -204,7 +204,7 @@ impl Core {
     }
 
     /// Start the background scheduler and skill file watcher
-    pub fn start_scheduler(&mut self) {
+    pub async fn start_scheduler(&mut self) {
         // Register FeishuBridge for built-in tools (send_feishu_message)
         mcp::builtin::register_feishu_bridge(self.feishu_bridge.clone(), self.feishu_chat_id.clone());
 
@@ -372,12 +372,8 @@ impl Core {
                 tools: vec![],
             };
             {
-                let reg = self.mcp_registry.clone();
-                let handle = tokio::runtime::Handle::current();
-                handle.block_on(async move {
-                    let mut guard = reg.write().await;
-                    guard.register_server(feishu_mcp_server);
-                });
+                let mut guard = self.mcp_registry.write().await;
+                guard.register_server(feishu_mcp_server);
             }
             tracing::info!("Feishu Remote MCP server registered (programmatic)");
         }

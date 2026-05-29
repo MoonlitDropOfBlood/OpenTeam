@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 use crate::feishu::bridge::FeishuBridge;
 use crate::feishu::types::{MessagePriority, OutgoingMessage};
 use crate::CoreError;
@@ -12,12 +12,12 @@ pub struct FeishuConfig {
 }
 
 /// Global static to hold the FeishuConfig for use by send_feishu_message tool
-static FEISHU_SENDER: OnceLock<tokio::sync::Mutex<Option<FeishuConfig>>> = OnceLock::new();
+static FEISHU_SENDER: OnceLock<Mutex<Option<FeishuConfig>>> = OnceLock::new();
 
 /// Register the FeishuBridge with chat_id for use by the send_feishu_message tool
 pub fn register_feishu_bridge(bridge: FeishuBridge, chat_id: String) {
-    let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
-    *lock.blocking_lock() = Some(FeishuConfig { bridge, chat_id });
+    let lock = FEISHU_SENDER.get_or_init(|| Mutex::new(None));
+    *lock.lock().unwrap() = Some(FeishuConfig { bridge, chat_id });
     tracing::info!("[builtin] FeishuBridge registered with chat_id for send_feishu_message tool");
 }
 
@@ -347,27 +347,30 @@ async fn cmd_send_feishu(args: &serde_json::Value) -> Result<String, CoreError> 
     let thread_id = args["thread_id"].as_str()
         .and_then(|s| if s.is_empty() { None } else { Some(s.to_string()) });
 
-    let lock = FEISHU_SENDER.get_or_init(|| tokio::sync::Mutex::new(None));
-    let guard = lock.lock().await;
-    let config = guard.as_ref()
-        .ok_or_else(|| CoreError::Mcp("FeishuBridge not initialized".into()))?;
+    let lock = FEISHU_SENDER.get_or_init(|| Mutex::new(None));
+    let (bridge, chat_id) = {
+        let guard = lock.lock().unwrap();
+        let config = guard.as_ref()
+            .ok_or_else(|| CoreError::Mcp("FeishuBridge not initialized".into()))?;
+        (config.bridge.clone(), config.chat_id.clone())
+    };
 
     if let Some(tid) = &thread_id {
         // Reply in thread
-        let msg_id = config.bridge.reply_to_message(tid, message, true).await
+        let msg_id = bridge.reply_to_message(tid, message, true).await
             .map_err(|e| CoreError::Mcp(format!("Thread reply failed: {e}")))?;
         tracing::info!("[send_feishu] Replied in thread {tid}: message_id={msg_id}");
         Ok(format!("Replied in thread (id: {msg_id})"))
     } else {
         // Send to main channel
         let outgoing = OutgoingMessage {
-            chat_id: config.chat_id.clone(),
+            chat_id,
             thread_id: None,
             text: message.to_string(),
             mentions: vec![],
             priority: MessagePriority::Secretary,
         };
-        let msg_id = config.bridge.send_message(&outgoing).await
+        let msg_id = bridge.send_message(&outgoing).await
             .map_err(|e| CoreError::Mcp(format!("Feishu send failed: {e}")))?;
         tracing::info!("[send_feishu] Sent to main channel: message_id={msg_id}");
         Ok(format!("Message sent (id: {msg_id})"))
