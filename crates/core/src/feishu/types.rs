@@ -27,6 +27,7 @@ pub struct FeishuMessage {
 // ---- Channel SDK NormalizedMessage (matches Node.js SDK format) ----
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NormalizedMessage {
     pub message_id: MessageId,
     pub chat_id: ChatId,
@@ -46,6 +47,7 @@ pub struct NormalizedMessage {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct MentionInfo {
     pub user_id: String,
     pub name: String,
@@ -53,6 +55,7 @@ pub struct MentionInfo {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceDescriptor {
     pub resource_type: String, // "image" | "file" | "audio" | "video" | "sticker"
     pub file_key: String,
