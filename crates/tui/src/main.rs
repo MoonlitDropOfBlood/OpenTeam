@@ -5,7 +5,6 @@ use std::fs;
 use feishu_agent_core::Core;
 use feishu_agent_core::registry::AgentStatus;
 use ratatui::crossterm::event::{self, Event, KeyCode, KeyEventKind};
-use tracing_subscriber::prelude::*;
 
 use crate::app::{AgentInfo, App, MemoryDisplay, Page};
 
@@ -60,7 +59,7 @@ async fn main() -> anyhow::Result<()> {
     let logs_dir = feishu_agent_core::skill::registry::global_logs_dir();
     fs::create_dir_all(&logs_dir)?;
 
-    // Configure tracing: file (~/.config/OpenTeam/logs/) + stderr (terminal)
+    // Configure tracing: file-only output to ~/.config/OpenTeam/logs/
     if std::env::var("RUST_LOG").is_err() {
         std::env::set_var("RUST_LOG", "info");
     }
@@ -68,18 +67,10 @@ async fn main() -> anyhow::Result<()> {
 
     let file_appender = tracing_appender::rolling::daily(&logs_dir, "openteam");
     let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let file_layer = tracing_subscriber::fmt::layer()
+    tracing_subscriber::fmt()
         .with_writer(non_blocking)
         .with_ansi(false)
-        .with_filter(filter.clone());
-
-    let stderr_layer = tracing_subscriber::fmt::layer()
-        .with_writer(std::io::stderr)
-        .with_filter(filter);
-
-    tracing_subscriber::registry()
-        .with(file_layer)
-        .with(stderr_layer)
+        .with_env_filter(filter)
         .init();
 
     let mut terminal = ratatui::init();
