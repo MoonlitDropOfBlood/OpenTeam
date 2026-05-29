@@ -49,7 +49,7 @@ pub struct NormalizedMessage {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MentionInfo {
-    pub user_id: String,
+    pub user_id: Option<String>,
     pub name: String,
     pub is_bot: bool,
 }
@@ -160,4 +160,35 @@ pub struct JsonRpcNotification {
     pub id: Option<serde_json::Value>, // null for notifications
     pub method: String,
     pub params: serde_json::Value,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_normalized_message_parse() {
+        let json = serde_json::json!({
+            "chatId": "oc_test123",
+            "chatType": "group",
+            "content": "你好",
+            "createTime": 1780067243968i64,
+            "mentionAll": false,
+            "mentionedBot": true,
+            "mentions": [{"isBot": true, "key": "@_user_1", "name": "Bot", "openId": "ou_abc", "userId": null}],
+            "messageId": "om_test123",
+            "rawContentType": "text",
+            "resources": [],
+            "senderId": "ou_xyz",
+        });
+        let msg: NormalizedMessage = serde_json::from_value(json).unwrap();
+        assert_eq!(msg.message_id, "om_test123");
+        assert_eq!(msg.chat_id, "oc_test123");
+        assert_eq!(msg.chat_type, "group");
+        assert_eq!(msg.sender_id, "ou_xyz");
+        assert_eq!(msg.content, "你好");
+        assert!(msg.mentioned_bot);
+        assert_eq!(msg.mentions.len(), 1);
+        assert!(msg.mentions[0].is_bot);
+    }
 }

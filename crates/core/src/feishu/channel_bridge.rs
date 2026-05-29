@@ -177,7 +177,7 @@ impl FeishuChannelBridge {
         } else {
             // Prepend @mentions as text
             let _mentions: Vec<MentionInfo> = msg.mentions.iter().map(|m| MentionInfo {
-                user_id: m.user_id.clone(),
+                user_id: Some(m.user_id.clone()),
                 name: m.name.clone(),
                 is_bot: false,
             }).collect();
@@ -487,7 +487,9 @@ impl FeishuChannelBridge {
                         msg.sender_id, &msg.content[..msg.content.len().min(60)]);
                     let _ = msg_tx.send(msg);
                 } else {
-                    tracing::warn!("[ChannelBridge] Failed to parse NormalizedMessage: {params}");
+                    let err = serde_json::from_value::<NormalizedMessage>(params.clone())
+                        .unwrap_err();
+                    tracing::warn!("[ChannelBridge] Failed to parse NormalizedMessage: {err} — data: {params}");
                 }
             }
             "feishu:ready" => {
