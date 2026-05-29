@@ -29,7 +29,13 @@ pub fn load_llm_config(path: &Path) -> Result<llm::LlmConfig, CoreError> {
 }
 
 /// Load all agent configs from a directory (sorted by filename for determinism)
+/// Returns empty vec if directory doesn't exist.
 pub fn load_all_agents(dir: &Path) -> Result<Vec<agent::AgentConfig>, CoreError> {
+    if !dir.exists() {
+        tracing::info!("Agent directory not found, creating: {:?}", dir);
+        std::fs::create_dir_all(dir)?;
+        return Ok(Vec::new());
+    }
     let mut entries: Vec<_> = std::fs::read_dir(dir)?
         .collect::<Result<Vec<_>, _>>()?;
     entries.sort_by_key(|e| e.file_name());
