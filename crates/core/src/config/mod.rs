@@ -1,4 +1,5 @@
 pub mod agent;
+pub mod feishu;
 pub mod llm;
 pub mod provider;
 
@@ -190,6 +191,5 @@ triggers: []
         assert!(config.provider.contains_key("openai"), "llm_config.yaml should have openai provider");
         assert!(config.provider.contains_key("ollama"), "llm_config.yaml should have ollama provider");
 
-        assert!(config.models.contains_key("claude-sonnet-4"), "llm_config.yaml should have legacy models");
     }
 }

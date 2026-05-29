@@ -64,25 +64,14 @@ impl Core {
 
         // === Feishu mandatory validation ===
 
-        // 1. Check FEISHU_APP_ID and FEISHU_APP_SECRET env vars — must be set
-        let feishu_app_id = std::env::var("FEISHU_APP_ID")
-            .map_err(|_| CoreError::Config(
-                "FEISHU_APP_ID environment variable must be set. \
-                 Get it from the Feishu Developer Console.".into()
-            ))?;
-        let feishu_app_secret = std::env::var("FEISHU_APP_SECRET")
-            .map_err(|_| CoreError::Config(
-                "FEISHU_APP_SECRET environment variable must be set. \
-                 Get it from the Feishu Developer Console.".into()
-            ))?;
-        tracing::info!("Feishu credentials configured (app_id: {})", &feishu_app_id[..8]);
+        // Load global config (fall back to env vars)
+        let global_config = config::feishu::load_global_config()?;
 
-        // 2. Check FEISHU_CHAT_ID env var — must be set
-        let feishu_chat_id = std::env::var("FEISHU_CHAT_ID")
-            .map_err(|_| CoreError::Config(
-                "FEISHU_CHAT_ID environment variable must be set. \
-                 Get it from your Feishu group chat settings.".into()
-            ))?;
+        let feishu_app_id = config::feishu::resolve_app_id(&global_config)?;
+        let feishu_app_secret = config::feishu::resolve_app_secret(&global_config)?;
+        let feishu_chat_id = config::feishu::resolve_chat_id(&global_config)?;
+
+        tracing::info!("Feishu credentials configured (app_id: {})", &feishu_app_id[..8]);
         tracing::info!("Feishu chat_id: {}", feishu_chat_id);
 
         // 3. Create bridge (no lark-cli dependency)
