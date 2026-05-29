@@ -26,14 +26,13 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     };
 
     let status = vec![
-        Line::from(vec!["Feishu CLI: ".into(), feishu_status]),
+        Line::from(vec!["Feishu Channel SDK: ".into(), feishu_status]),
         Line::from(vec!["Plugin System: ".into(), plugin_status]),
         Line::from(vec!["".into()]),
-        Line::from(vec!["Recent Events:".bold().into()]),
-        Line::from(vec!["  im.message.receive_v1 — monitoring...".dim().into()]),
-        Line::from(vec!["  im.message.reaction.created_v1 — monitoring...".dim().into()]),
+        Line::from(vec!["Event Subscription:".bold().into()]),
+        Line::from(vec!["  im.message.receive_v1 — listening via WebSocket".dim().into()]),
         Line::from(vec!["".into()]),
-        Line::from(format!("Agents: {} loaded | Database: sqlite:tui.db", app.agent_count)),
+        Line::from(vec![format!("Agents: {} loaded | Chat ID configured", app.agent_count)]),
     ];
 
     let block = Block::default()
