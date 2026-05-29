@@ -19,7 +19,7 @@
  *   {"jsonrpc":"2.0","id":null,"method":"feishu:message","params":{...}}
  */
 
-const { createLarkChannel } = require('@larksuiteoapi/node-sdk');
+const { createLarkChannel, LoggerLevel } = require('@larksuiteoapi/node-sdk');
 const readline = require('readline');
 
 // ---------- State ----------
@@ -89,6 +89,7 @@ async function handleRequest(request) {
                     appId,
                     appSecret,
                     domain: domain || undefined,
+                    loggerLevel: LoggerLevel.error,
                     policy: {
                         requireMention: true,
                         dmMode: 'open',
