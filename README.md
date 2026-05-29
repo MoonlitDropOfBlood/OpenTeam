@@ -457,20 +457,28 @@ EOF
 
 ### 第七步：配置飞书（**必选**）
 
-飞书集成现在为强制要求。启动前必须完成以下配置：
+飞书集成为强制要求。启动前完成以下配置：
+
+**编辑 `~/.config/OpenTeam/config.yaml`：**
+
+```yaml
+# 在飞书开发者后台 (https://open.feishu.cn/app) 创建企业自建应用后获取
+feishu:
+  app_id: "cli_你的AppID"          # 替换为你的 App ID
+  app_secret: "你的AppSecret"      # 替换为你的 App Secret
+  chat_id: "oc_你的群ChatID"       # 替换为你的群 Chat ID
+
+# 也可以用环境变量代替（config.yaml 优先）：
+#   FEISHU_APP_ID
+#   FEISHU_APP_SECRET
+#   FEISHU_CHAT_ID
+```
+
+群 Chat ID 获取方式：飞书群聊 → 群设置 → 更多 → 群信息，在页面底部找 `oc_` 开头的 ID。
+
+**安装 Node.js 插件依赖：**
 
 ```bash
-# 1. 在飞书开发者后台创建企业自建应用
-#    获取 App ID 和 App Secret
-
-# 2. 设置飞书应用凭据
-export FEISHU_APP_ID=cli_xxxxxxxxxxxx
-export FEISHU_APP_SECRET=xxxxxxxxxxxxxxxxxxxx
-
-# 3. 设置飞书群 ID（用于发送消息）
-export FEISHU_CHAT_ID=oc_xxxxxxxxxxxx
-
-# 4. 安装 Node.js 插件依赖
 cd plugins/feishu-channel && npm install
 ```
 
