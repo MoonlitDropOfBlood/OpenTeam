@@ -254,6 +254,11 @@ pub fn global_agents_dir() -> std::path::PathBuf {
     home_dir().join(".config/OpenTeam/agents")
 }
 
+/// Get the global logs directory path (~/.config/OpenTeam/logs/)
+pub fn global_logs_dir() -> std::path::PathBuf {
+    home_dir().join(".config/OpenTeam/logs")
+}
+
 /// Built-in skills embedded at compile time, released to global config on startup
 const BUILT_IN_SKILLS: &[(&str, &str, &str)] = &[
     (
