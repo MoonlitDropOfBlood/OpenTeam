@@ -77,13 +77,13 @@ impl FeishuChannelBridge {
     pub async fn start(&mut self, app_id: &str, app_secret: &str) -> Result<(), CoreError> {
         let plugin_path = Self::resolve_plugin_path()?;
 
-        // Spawn Node.js process
-        let mut child = Command::new("node")
-            .arg(&plugin_path)
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::inherit())
-            .spawn()
+// Spawn Node.js process
+    let mut child = Command::new("node")
+        .arg(&plugin_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
             .map_err(|e| CoreError::Feishu(format!("Failed to spawn feishu-channel plugin: {e}")))?;
 
         tracing::info!("[ChannelBridge] Plugin spawned (pid: {:?})", child.id());
@@ -120,7 +120,24 @@ impl FeishuChannelBridge {
             Self::read_loop(stdout, r_pending, r_msg_tx, r_status_tx, r_ready).await;
         });
 
-        // Store child handle
+        // Stderr reader task: forward plugin logs to tracing (not terminal)
+        let stderr = child.stderr.take()
+            .ok_or_else(|| CoreError::Feishu("Plugin has no stderr".into()))?;
+        tokio::spawn(async move {
+            use tokio::io::AsyncBufReadExt;
+            let mut reader = tokio::io::BufReader::new(stderr);
+            let mut line = String::new();
+            loop {
+                line.clear();
+                match reader.read_line(&mut line).await {
+                    Ok(0) => break,
+                    Ok(_) => tracing::info!("[plugin] {}", line.trim()),
+                    Err(_) => break,
+                }
+            }
+        });
+
+        // Store child handle (stderr already taken above)
         {
             let mut guard = self.child.lock().await;
             *guard = Some(child);

@@ -272,7 +272,7 @@ function main() {
         process.stderr.write('[feishu-channel] ' + args.join(' ') + '\n');
     };
 
-    console.error('Starting Feishu Channel plugin...');
+    // No startup message — stderr is piped to tracing by the Rust host
 
     const rl = readline.createInterface({
         input: process.stdin,
