@@ -25,6 +25,7 @@ pub struct ProviderConfig {
 
 /// Provider-level options — all fields are optional, defaults come from built-in
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ProviderOptions {
     /// API key value or "{env:VAR}" reference
     pub api_key: Option<String>,
@@ -93,7 +94,7 @@ mod tests {
         let yaml = r#"
 name: "Test"
 options:
-  base_url: https://test.com/v1
+  baseUrl: https://test.com/v1
   timeout: 60000
 "#;
         let config: ProviderConfig = serde_yaml::from_str(yaml).unwrap();

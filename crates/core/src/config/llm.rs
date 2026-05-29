@@ -1,15 +1,11 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use crate::config::agent::ModelConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LlmConfig {
     /// Provider configurations (keyed by provider ID)
     #[serde(default)]
     pub provider: HashMap<String, super::provider::ProviderConfig>,
-    /// Legacy model pool (kept for backward compatibility)
-    #[serde(default)]
-    pub models: HashMap<String, ModelConfig>,
 }
 
 /// Model limit config in YAML
@@ -35,14 +31,9 @@ provider:
     models:
       test-model:
         name: "Test Model"
-models:
-  legacy-model:
-    model: anthropic/claude-sonnet-4-20250514
-    max_tokens: 8192
 "#;
         let config: LlmConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.provider.contains_key("test-provider"));
-        assert!(config.models.contains_key("legacy-model"));
     }
 
     #[test]
@@ -52,7 +43,7 @@ provider:
   custom:
     name: "Custom API"
     options:
-      base_url: https://custom.ai/v1
+      baseUrl: https://custom.ai/v1
       timeout: 120000
       headers:
         X-Auth: my-token
@@ -70,7 +61,6 @@ provider:
         let yaml = r#"{}"#;
         let config: LlmConfig = serde_yaml::from_str(yaml).unwrap();
         assert!(config.provider.is_empty());
-        assert!(config.models.is_empty());
     }
 
     #[test]
