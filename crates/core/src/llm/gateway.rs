@@ -10,7 +10,6 @@ use rand::Rng;
 #[derive(Clone)]
 pub struct LlmGateway {
     client: reqwest::Client,
-    models: HashMap<String, ModelConfig>,
     rate_limiters: HashMap<String, RateLimiter>,
     provider_resolver: ProviderResolver,
 }
@@ -75,13 +74,10 @@ pub struct TokenUsage {
 
 impl LlmGateway {
     pub fn new(config: LlmConfig, provider_resolver: ProviderResolver) -> Self {
-        // Check skip_verify_ssl from both legacy models and provider configs
-        let skip_verify_legacy = config.models.values().any(|m| m.skip_verify_ssl.unwrap_or(false));
-        let skip_verify_provider = config.provider.values().any(|p| {
+        let skip_verify = config.provider.values().any(|p| {
             p.options.headers.contains_key("skip_verify_ssl")
                 || p.options.base_url.as_deref().map_or(false, |url| url.starts_with("http://"))
         });
-        let skip_verify = skip_verify_legacy || skip_verify_provider;
 
         let mut client_builder = reqwest::Client::builder()
             .timeout(Duration::from_secs(180));
@@ -92,25 +88,11 @@ impl LlmGateway {
 
         let client = client_builder.build().unwrap();
 
-        let mut rate_limiters = HashMap::new();
-        for (_, model_config) in &config.models {
-            if let Some(rate) = &model_config.rate_limit {
-                let key = format!("{}/{}", model_config.provider(), model_config.model_name());
-                rate_limiters.insert(key, RateLimiter::new(rate.rpm));
-            }
-        }
-
         Self {
             client,
-            models: config.models,
-            rate_limiters,
+            rate_limiters: HashMap::new(),
             provider_resolver,
         }
-    }
-
-    /// Look up model config from global pool by name
-    pub fn get_model(&self, name: &str) -> Option<&ModelConfig> {
-        self.models.get(name)
     }
 
     /// Resolve a ModelConfig through the provider resolution chain
@@ -163,9 +145,8 @@ impl LlmGateway {
             let result = match resolved.provider.as_str() {
                 "anthropic" => self.call_anthropic_resolved(&resolved, &api_key, request).await,
                 "ollama" => self.call_ollama_resolved(&resolved, &api_key, request).await,
-                "deepseek" | "openai" | "groq" | "openrouter" | "xai"
-                    => self.call_openai_compat_resolved(&resolved, &api_key, request).await,
-                provider => Err(CoreError::Llm(format!("Unsupported provider: {}", provider))),
+                // Known OpenAI-compatible providers + any custom provider
+                _ => self.call_openai_compat_resolved(&resolved, &api_key, request).await,
             };
 
             match result {
