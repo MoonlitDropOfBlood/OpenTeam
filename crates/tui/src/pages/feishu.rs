@@ -1,17 +1,12 @@
-use ratatui::layout::{Rect, Alignment};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    let title = Paragraph::new("Feishu Status")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .alignment(Alignment::Center);
-    f.render_widget(title, area);
-
-    let inner = area.inner(ratatui::layout::Margin { vertical: 2, horizontal: 2 });
+    let inner = area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 1 });
 
     let feishu_status = if app.feishu_connected {
         "Connected".to_string().fg(Color::Green)
@@ -32,7 +27,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
         Line::from(vec!["Event Subscription:".bold().into()]),
         Line::from(vec!["  im.message.receive_v1 — listening via WebSocket".dim().into()]),
         Line::from(vec!["".into()]),
-        Line::from(vec![format!("Agents: {} loaded | Chat ID configured", app.agent_count)]),
+        Line::from(format!("Agents: {} loaded | Chat ID configured", app.agent_count)),
     ];
 
     let block = Block::default()

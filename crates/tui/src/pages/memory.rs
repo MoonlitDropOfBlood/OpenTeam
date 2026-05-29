@@ -1,17 +1,12 @@
 use ratatui::layout::{Rect, Alignment, Margin};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    let title = Paragraph::new("Memory Browser")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .alignment(Alignment::Center);
-    f.render_widget(title, area);
-
-    let inner = area.inner(Margin { vertical: 2, horizontal: 2 });
+    let inner = area.inner(Margin { vertical: 1, horizontal: 1 });
 
     if app.memories.is_empty() {
         let empty = Paragraph::new("No memories stored yet.\n\nPress 'r' to refresh from Core.\n(F6 to view this page)")

@@ -1,17 +1,12 @@
-use ratatui::layout::{Rect, Alignment};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    let title = Paragraph::new("Task Board")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .alignment(Alignment::Center);
-    f.render_widget(title, area);
-
-    let inner = area.inner(ratatui::layout::Margin { vertical: 2, horizontal: 2 });
+    let inner = area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 1 });
 
     let task_lines: Vec<Line> = if app.tasks.is_empty() {
         vec![Line::from(vec![

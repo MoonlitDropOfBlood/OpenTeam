@@ -1,5 +1,5 @@
 use ratatui::layout::{Margin, Rect};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
@@ -7,15 +7,9 @@ use ratatui::Frame;
 use crate::app::App;
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    // Page title
-    let title = Paragraph::new("Agent Management")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD));
-    f.render_widget(title, area);
-
-    // Agent list area (below title)
     let inner = area.inner(Margin {
-        vertical: 2,
-        horizontal: 2,
+        vertical: 1,
+        horizontal: 1,
     });
 
     let agents_display: Vec<Line> = if app.agents.is_empty() {

@@ -1,7 +1,7 @@
 use std::fs;
 use std::io::{BufRead, BufReader};
-use ratatui::layout::{Rect, Alignment};
-use ratatui::style::{Color, Modifier, Style, Stylize};
+use ratatui::layout::Rect;
+use ratatui::style::{Color, Style, Stylize};
 use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Paragraph, Wrap};
 use ratatui::Frame;
@@ -71,12 +71,7 @@ fn read_recent_logs() -> Vec<String> {
 }
 
 pub fn draw(f: &mut Frame, area: Rect, app: &App) {
-    let title = Paragraph::new("Log Viewer")
-        .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
-        .alignment(Alignment::Center);
-    f.render_widget(title, area);
-
-    let inner = area.inner(ratatui::layout::Margin { vertical: 2, horizontal: 2 });
+    let inner = area.inner(ratatui::layout::Margin { vertical: 1, horizontal: 1 });
 
     let block = Block::default()
         .title(format!(" Logs (scroll: {}↑↓) ", app.log_scroll))

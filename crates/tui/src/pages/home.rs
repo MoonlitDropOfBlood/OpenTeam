@@ -30,7 +30,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
                 "Offline" | "Paused" => "\u{26aa}",   // white circle
                 _ => "\u{1f7e0}",                     // orange circle
             };
-            format!("{} ({})  {} {}", a.name, a.role, status_icon, a.status)
+            format!("{}  {} {}", a.name, status_icon, a.status)
         }).collect::<Vec<_>>().join("\n")
     };
 
