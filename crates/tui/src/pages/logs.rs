@@ -70,7 +70,7 @@ fn read_recent_logs() -> Vec<String> {
     }
 }
 
-pub fn draw(f: &mut Frame, area: Rect, _app: &App) {
+pub fn draw(f: &mut Frame, area: Rect, app: &App) {
     let title = Paragraph::new("Log Viewer")
         .style(Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD))
         .alignment(Alignment::Center);
@@ -79,18 +79,31 @@ pub fn draw(f: &mut Frame, area: Rect, _app: &App) {
     let inner = area.inner(ratatui::layout::Margin { vertical: 2, horizontal: 2 });
 
     let block = Block::default()
-        .title(" Logs (latest) ")
+        .title(format!(" Logs (scroll: {}↑↓) ", app.log_scroll))
         .borders(Borders::ALL)
         .style(Style::default().fg(Color::Yellow));
     let block_inner = block.inner(inner);
     f.render_widget(block, inner);
 
-    let log_lines: Vec<Line> = read_recent_logs()
-        .into_iter()
-        .map(|l| Line::from(l.dim()))
-        .collect();
+    let all_lines = read_recent_logs();
+    let total = all_lines.len();
 
-    let list = Paragraph::new(log_lines)
+    // Compute visible range based on scroll offset
+    let visible_height = (block_inner.height as usize).saturating_sub(1);
+    let scroll = app.log_scroll.min(total.saturating_sub(visible_height));
+    let end = total.saturating_sub(scroll);
+    let start = end.saturating_sub(visible_height);
+
+    let visible: Vec<Line> = if total == 0 {
+        vec![Line::from("(No logs yet)".dim())]
+    } else {
+        all_lines[start..end]
+            .iter()
+            .map(|l| Line::from(l.clone().dim()))
+            .collect()
+    };
+
+    let list = Paragraph::new(visible)
         .wrap(Wrap { trim: false })
         .style(Style::default().fg(Color::White));
     f.render_widget(list, block_inner);

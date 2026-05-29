@@ -45,6 +45,7 @@ pub struct App {
     pub memories: Vec<MemoryDisplay>,
     pub auto_refresh: bool,
     pub tasks: Vec<TaskInfo>,
+    pub log_scroll: usize,
 }
 
 impl App {
@@ -61,6 +62,7 @@ impl App {
             memories: Vec::new(),
             auto_refresh: true,
             tasks: Vec::new(),
+            log_scroll: 0,
         }
     }
 

@@ -226,9 +226,32 @@ async fn main() -> anyhow::Result<()> {
                         KeyCode::F(1) => app.navigate(Page::Home),
                         KeyCode::F(2) => app.navigate(Page::Agents),
                         KeyCode::F(3) => app.navigate(Page::Tasks),
-                        KeyCode::F(4) => app.navigate(Page::Logs),
+                        KeyCode::F(4) => {
+                            app.log_scroll = 0;
+                            app.navigate(Page::Logs);
+                        }
                         KeyCode::F(5) => app.navigate(Page::Feishu),
                         KeyCode::F(6) => app.navigate(Page::Memory),
+                        KeyCode::Up => {
+                            if app.current_page == Page::Logs {
+                                app.log_scroll = app.log_scroll.saturating_sub(1);
+                            }
+                        }
+                        KeyCode::Down => {
+                            if app.current_page == Page::Logs {
+                                app.log_scroll = app.log_scroll.saturating_add(1);
+                            }
+                        }
+                        KeyCode::PageUp => {
+                            if app.current_page == Page::Logs {
+                                app.log_scroll = app.log_scroll.saturating_sub(20);
+                            }
+                        }
+                        KeyCode::PageDown => {
+                            if app.current_page == Page::Logs {
+                                app.log_scroll = app.log_scroll.saturating_add(20);
+                            }
+                        }
                         _ => {}
                     }
                 }
