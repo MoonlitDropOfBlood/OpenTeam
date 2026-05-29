@@ -37,10 +37,7 @@ pub fn draw(f: &mut Frame, area: Rect, app: &App) {
 
                 vec![
                     Line::from(vec![
-                        format!(
-                            "{} {} ({})            ",
-                            run_icon, agent.name, agent.role
-                        )
+                        format!("{} {}         ", run_icon, agent.name)
                         .into(),
                         agent.status.clone().fg(status_color).into(),
                         format!("  {} [Edit] [Delete]", action).into(),
